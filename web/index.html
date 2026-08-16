@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mèo Bot — monitor</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <header>
+      <div>
+        <h1>Mèo Bot</h1>
+        <p class="sub">Monitor trên PC — không tăng tải ESP-12F</p>
+      </div>
+      <div class="pills">
+        <span id="ollamaPill" class="pill">Ollama …</span>
+        <span id="devicePill" class="pill">ESP offline</span>
+      </div>
+    </header>
+
+    <main>
+      <section class="card">
+        <h2>Thiết bị</h2>
+        <dl>
+          <div><dt>Trạng thái</dt><dd id="state">offline</dd></div>
+          <div><dt>Nhiệt độ</dt><dd id="temp">—</dd></div>
+          <div><dt>Độ ẩm</dt><dd id="humidity">—</dd></div>
+          <div><dt>Phiên</dt><dd id="session">—</dd></div>
+        </dl>
+        <div id="listenBar" class="listen-bar hidden">
+          <span>Đang nghe</span>
+          <progress id="listenProgress" max="5000" value="5000"></progress>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Thử Ollama (text)</h2>
+        <p class="hint">Cùng phiên nóng với thiết bị. Dùng để kiểm tra prompt trước khi có mic.</p>
+        <form id="chatForm">
+          <input id="chatInput" type="text" maxlength="500" placeholder="Nhắn cho Mèo Bot…" autocomplete="off" />
+          <button type="submit">Gửi</button>
+        </form>
+        <ul id="chatLog" class="log chat"></ul>
+      </section>
+
+      <section class="card wide">
+        <h2>Nhật ký</h2>
+        <ul id="eventLog" class="log"></ul>
+      </section>
+    </main>
+    <script src="/static/app.js"></script>
+  </body>
+</html>
