@@ -37,6 +37,4 @@ Copy `firmware/KatBot/secrets.h.example` to `firmware/KatBot/secrets.h` (gitigno
 
 Mic PCM and I2S playback are not enabled yet; listen start/stop and telemetry already go to the PC.
 
-## Serial
-
-115200 baud. Expect Wi-Fi IP, then `WS connected`.
+No `Serial.begin` — RX (GPIO3) is reserved for MAX98357 DIN (hardware I2S). Debug via OLED and the web monitor. USB upload still uses TX/RX in the bootloader before the sketch runs.

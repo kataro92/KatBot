@@ -28,7 +28,7 @@ Follow silkscreen on each module if pin order differs (especially OLED VCC/GND).
 | MAX9814 OUT | A0 | ADC | 0–3.3 V on NodeMCU |
 | MAX98357 BCLK | D8 | 15 | Must be LOW at boot |
 | MAX98357 LRC | D4 | 2 | WS / LRCLK |
-| MAX98357 DIN | D7 | 13 | Do not use RX |
+| MAX98357 DIN | RX | 3 | Native I2S data (no Serial) |
 | MAX98357 VIN | Vin | 5 V USB | For 3 W speaker |
 | OLED / DHT / MAX9814 VCC | 3V3 | | |
 | All GND | GND | | Common ground |

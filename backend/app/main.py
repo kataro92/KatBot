@@ -2,18 +2,32 @@ from __future__ import annotations
 
 import json
 import logging
+import asyncio
 from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.types import Scope
 from pydantic import BaseModel, Field
 
 from .config import WEB_DIR, settings
 from .hub import hub
 from .ollama_session import OllamaError, OllamaSession
-from .pipeline import on_listen_stop
+from .pipeline import handle_user_text, on_listen_stop
+from .version import web_asset_version
+
+
+class NoCacheStaticFiles(StaticFiles):
+    def is_not_modified(self, response_headers, request_headers) -> bool:
+        return False
+
+    async def get_response(self, path: str, scope: Scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        return response
 
 logging.basicConfig(
     level=logging.INFO,
@@ -43,6 +57,11 @@ class ChatIn(BaseModel):
     text: str = Field(min_length=1, max_length=500)
 
 
+@app.get("/api/version")
+async def version() -> dict[str, str]:
+    return {"version": web_asset_version()}
+
+
 @app.get("/api/health")
 async def health() -> dict[str, Any]:
     return {
@@ -52,17 +71,16 @@ async def health() -> dict[str, Any]:
         "model": settings.ollama_model,
         "device_online": hub.device_online,
         "state": hub.state,
+        "version": web_asset_version(),
     }
 
 
 @app.post("/api/chat")
 async def chat(body: ChatIn) -> dict[str, str]:
     try:
-        reply = await session.chat(body.text)
+        reply = await handle_user_text(session, body.text)
     except OllamaError as exc:
         return {"reply": "", "error": str(exc)}
-    await hub.broadcast({"type": "chat", "role": "user", "text": body.text})
-    await hub.broadcast({"type": "chat", "role": "assistant", "text": reply})
     return {"reply": reply, "error": ""}
 
 
@@ -121,8 +139,8 @@ async def _handle_device_json(raw: str) -> None:
             await hub.log("info", "Listen 5s start")
             await hub.broadcast({"type": "listen", "state": "start", "ms": 5000})
         elif state == "stop":
-            await on_listen_stop(session)
             await hub.broadcast({"type": "listen", "state": "stop"})
+            asyncio.create_task(on_listen_stop(session))
     elif kind == "telemetry":
         if "temp" in msg:
             try:
@@ -168,10 +186,16 @@ async def ws_monitor(ws: WebSocket) -> None:
 
 @app.get("/")
 async def index() -> FileResponse:
-    return FileResponse(WEB_DIR / "index.html")
+    return FileResponse(
+        WEB_DIR / "index.html",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+        },
+    )
 
 
-app.mount("/static", StaticFiles(directory=str(WEB_DIR)), name="static")
+app.mount("/static", NoCacheStaticFiles(directory=str(WEB_DIR)), name="static")
 
 
 if __name__ == "__main__":

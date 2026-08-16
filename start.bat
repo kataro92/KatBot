@@ -41,11 +41,22 @@ if not exist ".env" (
   )
 )
 
+set PORT=8080
+if exist ".env" (
+  for /f "usebackq eol=# tokens=1,* delims==" %%A in (".env") do (
+    if /I "%%A"=="PORT" set "PORT=%%B"
+  )
+)
+
+echo Giai phong cong %PORT% neu dang bi chiem...
+powershell -NoProfile -Command ^
+  "$p=%PORT%; Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue | ForEach-Object { $id=$_.OwningProcess; if ($id -and $id -gt 0) { Write-Host ('Kill PID '+$id); Stop-Process -Id $id -Force -ErrorAction SilentlyContinue } }"
+
 echo.
-echo Mo monitor: http://127.0.0.1:8080
-echo ESP ket noi: ws://^<IP-LAN-PC^>:8080/ws/device
+echo Mo monitor: http://127.0.0.1:%PORT%
+echo ESP ket noi: ws://^<IP-LAN-PC^>:%PORT%/ws/device
 echo.
 cd backend
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8080
+python -m uvicorn app.main:app --host 0.0.0.0 --port %PORT%
 echo.
 pause

@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Mèo Bot — monitor</title>
+    <meta http-equiv="Cache-Control" content="no-store" />
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
@@ -19,14 +20,33 @@
     </header>
 
     <main>
-      <section class="card">
-        <h2>Thiết bị</h2>
-        <dl>
-          <div><dt>Trạng thái</dt><dd id="state">offline</dd></div>
-          <div><dt>Nhiệt độ</dt><dd id="temp">—</dd></div>
-          <div><dt>Độ ẩm</dt><dd id="humidity">—</dd></div>
-          <div><dt>Phiên</dt><dd id="session">—</dd></div>
-        </dl>
+      <section class="card wide device-card">
+        <div class="device-head">
+          <h2>Thiết bị</h2>
+          <span id="session" class="session-id">phiên —</span>
+        </div>
+        <div class="metrics">
+          <div class="metric">
+            <span class="metric-label">Trạng thái</span>
+            <span id="state" class="metric-value">offline</span>
+          </div>
+          <div class="metric metric-temp">
+            <span class="metric-label">Nhiệt độ</span>
+            <span id="temp" class="metric-value">—</span>
+          </div>
+          <div class="metric metric-hum">
+            <span class="metric-label">Độ ẩm</span>
+            <span id="humidity" class="metric-value">—</span>
+          </div>
+        </div>
+        <div class="chart-wrap">
+          <canvas id="deviceChart" width="800" height="220"></canvas>
+          <div class="chart-legend">
+            <span class="leg leg-temp">Nhiệt độ °C</span>
+            <span class="leg leg-hum">Độ ẩm %</span>
+            <span class="chart-window">cửa sổ 3 phút · realtime</span>
+          </div>
+        </div>
         <div id="listenBar" class="listen-bar hidden">
           <span>Đang nghe</span>
           <progress id="listenProgress" max="5000" value="5000"></progress>
@@ -34,8 +54,8 @@
       </section>
 
       <section class="card">
-        <h2>Thử Ollama (text)</h2>
-        <p class="hint">Cùng phiên nóng với thiết bị. Dùng để kiểm tra prompt trước khi có mic.</p>
+        <h2>Chat (text + giọng)</h2>
+        <p class="hint">Cùng một phiên: nói trên ESP hoặc gõ ở đây. Câu bạn nói hiện trong bảng này; câu Mèo trả lời phát ra loa ESP.</p>
         <form id="chatForm">
           <input id="chatInput" type="text" maxlength="500" placeholder="Nhắn cho Mèo Bot…" autocomplete="off" />
           <button type="submit">Gửi</button>
@@ -43,7 +63,7 @@
         <ul id="chatLog" class="log chat"></ul>
       </section>
 
-      <section class="card wide">
+      <section class="card">
         <h2>Nhật ký</h2>
         <ul id="eventLog" class="log"></ul>
       </section>

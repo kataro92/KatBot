@@ -65,7 +65,7 @@ Full pin notes: [Wiki → Hardware](https://github.com/kataro92/KatBot/wiki/Hard
 | MAX9814 OUT | A0 | ADC | NodeMCU divider, 0–3.3 V |
 | MAX98357 BCLK | D8 | 15 | Must be LOW at boot |
 | MAX98357 LRC | D4 | 2 | |
-| MAX98357 DIN | D7 | 13 | Not RX/GPIO3, so Serial debug stays usable |
+| MAX98357 DIN | RX | 3 | Native I2S data; no Serial debug |
 
 ## Repository layout
 
@@ -115,7 +115,7 @@ Useful env vars (repo-root `.env`):
 2. Set `WIFI_SSID`, `WIFI_PASS`, and `WS_HOST` to this PC’s LAN IPv4. `secrets.h` is gitignored.
 3. Select **NodeMCU 1.0 (ESP-12E)**, the correct COM port, 115200 baud.
 4. Upload [`firmware/KatBot/KatBot.ino`](firmware/KatBot/KatBot.ino).
-5. Serial Monitor: Wi-Fi IP, then `WS connected`. The dashboard should show **ESP online**.
+5. OLED: Wi-Fi then `san sang` when the WebSocket is up. The dashboard should show **ESP online**.
 
 Press the listen button once (do not hold). OLED shows `NGHE` and a countdown; after 5 s it shows `NGHI` until the backend returns `idle`. Microphone streaming is not enabled yet.
 

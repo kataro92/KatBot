@@ -12,3 +12,4 @@ docs/__pycache__/
 *.bin
 *.elf
 *.map
+firmware/build/

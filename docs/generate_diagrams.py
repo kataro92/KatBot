@@ -174,7 +174,7 @@ def draw_wiring() -> None:
         "D4": WIRE["i2s"],
         "D5": WIRE["dht"],
         "D6": WIRE["btn"],
-        "D7": WIRE["i2s"],
+        "RX": WIRE["i2s"],
         "D8": WIRE["i2s"],
         "3V3": WIRE["3v3"],
         "GND": WIRE["gnd"],
@@ -323,7 +323,7 @@ def draw_wiring() -> None:
     # Amp
     wire(amp["VIN"], vin, WIRE["5v"], via=[(1900, amp["VIN"][1]), (1900, 1240), (1088, 1240)])
     wire(amp["GND"], right_gnds[0], WIRE["gnd"], via=[(1860, amp["GND"][1]), (1860, right_gnds[0][1])])
-    wire(amp["DIN"], rp["D7"], WIRE["i2s"], via=[(1844, amp["DIN"][1]), (1844, rp["D7"][1])])
+    wire(amp["DIN"], rp["RX"], WIRE["i2s"], via=[(1844, amp["DIN"][1]), (1844, rp["RX"][1])])
     wire(amp["BCLK"], rp["D8"], WIRE["i2s"], via=[(1820, amp["BCLK"][1]), (1820, rp["D8"][1])])
     wire(amp["LRC"], rp["D4"], WIRE["i2s"], via=[(1796, amp["LRC"][1]), (1796, rp["D4"][1])])
     amp_plus = (2580, 500)
@@ -368,7 +368,7 @@ def draw_wiring() -> None:
         ("MAX9814 OUT", "A0", "ADC NodeMCU"),
         ("MAX98357 VIN", "Vin (5V USB)", "công suất loa 3W"),
         ("MAX98357 GND", "GND", "chung mass"),
-        ("MAX98357 DIN", "D7 / GPIO13", "không dùng RX"),
+        ("MAX98357 DIN", "RX / GPIO3", "I2S phần cứng, không dùng Serial"),
         ("MAX98357 BCLK", "D8 / GPIO15", "GPIO15 phải LOW lúc boot"),
         ("MAX98357 LRC", "D4 / GPIO2", "WS / LRCLK"),
         ("Loa + / −", "MAX98357 + / −", "không nối loa thẳng vào ESP"),

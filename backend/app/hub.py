@@ -75,6 +75,14 @@ class Hub:
         except Exception:
             log.exception("send_device failed")
 
+    async def send_device_bin(self, data: bytes) -> None:
+        if self.device is None or not data:
+            return
+        try:
+            await self.device.send_bytes(data)
+        except Exception:
+            log.exception("send_device_bin failed")
+
     async def broadcast(self, msg: dict[str, Any]) -> None:
         dead: list[WebSocket] = []
         payload = json.dumps(msg, ensure_ascii=False)
