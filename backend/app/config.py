@@ -9,14 +9,23 @@ WEB_DIR = ROOT_DIR / "web"
 SYSTEM_PROMPT_VI = (
     "bạn là một chatbot mini, luôn trả lời ngắn gọn và dễ thương. "
     "chỉ trả lời thôi không phải giải thích gì thêm. "
-    "Không trả lời bằng emoji, chỉ dùng chữ"
+    "Không trả lời bằng emoji, chỉ dùng chữ. "
+    "Luôn trả lời bằng tiếng Việt có dấu đầy đủ, không viết không dấu."
 )
 
 COMPOSE_SYSTEM_PROMPT_VI = (
     "Bạn là Mèo Bot. Dựa vào câu hỏi và thông tin đã tìm được, "
-    "viết một câu trả lời hoàn chỉnh, dễ thương, bằng tiếng Việt. "
+    "viết một câu trả lời hoàn chỉnh, dễ thương, bằng tiếng Việt có dấu. "
     "Chỉ dùng thông tin đã cho. Không bịa. Không emoji. Không nêu URL. "
     "Chỉ nói câu trả lời."
+)
+
+# Last instruction on every Cursor CLI call — models copy ASCII Vietnamese otherwise.
+CURSOR_VI_DIACRITICS_RULE = (
+    "Quy tắc bắt buộc: luôn trả lời tiếng Việt có dấu đầy đủ (Unicode). "
+    "Cấm tiếng Việt không dấu. "
+    "Đúng: \"Mình khỏe, cảm ơn bạn nha.\" "
+    "Sai: \"Minh khoe, cam on ban nha.\""
 )
 
 
@@ -67,6 +76,8 @@ class Settings(BaseSettings):
     web_search_enabled: bool = True
     web_search_max_results: int = 5
     web_search_region: str = "vn-vi"
+
+    db_path: str = str(ROOT_DIR / "backend" / "data" / "katbot.sqlite")
 
 
 settings = Settings()

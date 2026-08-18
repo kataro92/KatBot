@@ -86,28 +86,28 @@ _CITY_HINTS = (
 def sensor_summary() -> str | None:
     if hub.temp is None and hub.humidity is None:
         if not hub.device_online:
-            return "ESP chua ket noi, chua co so lieu DHT11"
-        return "ESP online nhung chua doc duoc DHT11"
+            return "ESP chưa kết nối, chưa có số liệu DHT11"
+        return "ESP online nhưng chưa đọc được DHT11"
     parts: list[str] = []
     if hub.temp is not None:
-        parts.append(f"nhiet do {hub.temp:.1f}°C")
+        parts.append(f"nhiệt độ {hub.temp:.1f}°C")
     if hub.humidity is not None:
-        parts.append(f"do am {hub.humidity:.0f}%")
+        parts.append(f"độ ẩm {hub.humidity:.0f}%")
     online = "online" if hub.device_online else "offline"
     state = hub.state or "unknown"
-    return f"{', '.join(parts)} (ESP {online}, trang thai {state})"
+    return f"{', '.join(parts)} (ESP {online}, trạng thái {state})"
 
 
 def build_system_prompt() -> str:
     prompt = (
         f"{SYSTEM_PROMPT_VI} "
-        "Ban la Meo Bot co cam bien DHT11 tren ESP-12F. "
-        "Khi user hoi nhiet do hoac do am trong phong/tai cho, tra loi bang so lieu cam bien hien tai. "
-        "Neu chua co so lieu, noi ro la chua do duoc."
+        "Bạn là Mèo Bot có cảm biến DHT11 trên ESP-12F. "
+        "Khi người dùng hỏi nhiệt độ hoặc độ ẩm trong phòng/tại chỗ, trả lời bằng số liệu cảm biến hiện tại. "
+        "Nếu chưa có số liệu, nói rõ là chưa đo được."
     )
     reading = sensor_summary()
     if reading:
-        prompt += f" So lieu cam bien hien tai: {reading}."
+        prompt += f" Số liệu cảm biến hiện tại: {reading}."
     return prompt
 
 

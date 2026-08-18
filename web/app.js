@@ -12,6 +12,12 @@ const listenBar = document.getElementById("listenBar");
 const listenProgress = document.getElementById("listenProgress");
 const chartCanvas = document.getElementById("deviceChart");
 const chartCtx = chartCanvas.getContext("2d");
+const chartRanges = document.getElementById("chartRanges");
+const customRange = document.getElementById("customRange");
+const chartFromEl = document.getElementById("chartFrom");
+const chartToEl = document.getElementById("chartTo");
+const chartApply = document.getElementById("chartApply");
+const chartWindowLabel = document.getElementById("chartWindowLabel");
 
 let listenTimer = null;
 let listenEndsAt = 0;
@@ -19,24 +25,106 @@ let deviceOnline = false;
 let lastTemp = null;
 let lastHum = null;
 
-const WINDOW_MS = 3 * 60 * 1000;
-const SAMPLE_MS = 1000;
+const RANGE_MS = {
+  "1m": 60 * 1000,
+  "15m": 15 * 60 * 1000,
+  "1h": 60 * 60 * 1000,
+  "3h": 3 * 60 * 60 * 1000,
+  "12h": 12 * 60 * 60 * 1000,
+  "1d": 24 * 60 * 60 * 1000,
+};
+const RANGE_LABEL = {
+  "1m": "1 phút",
+  "15m": "15 phút",
+  "1h": "1 tiếng",
+  "3h": "3 tiếng",
+  "12h": "12 tiếng",
+  "1d": "1 ngày",
+  custom: "Tùy chọn",
+};
+
+let chartWindow = "15m";
+let customFromMs = null;
+let customToMs = null;
+let chartFromMs = Date.now() - RANGE_MS["15m"];
+let chartToMs = Date.now();
 const history = []; // { t, temp, hum }
 
-function addLog(message, cls) {
-  const li = document.createElement("li");
-  if (cls) li.className = cls;
-  const ts = new Date().toLocaleTimeString();
-  li.textContent = `${ts}  ${message}`;
-  eventLog.prepend(li);
-  while (eventLog.children.length > 200) eventLog.lastChild.remove();
+function formatClock(ts) {
+  return new Date(ts).toLocaleTimeString();
 }
 
-function addChat(role, text) {
+function addLog(message, cls, ts) {
+  const li = document.createElement("li");
+  if (cls) li.className = cls;
+  li.textContent = `${formatClock(ts || Date.now())}  ${message}`;
+  eventLog.prepend(li);
+  while (eventLog.children.length > 400) eventLog.lastChild.remove();
+}
+
+function addChat(role, text, audioId, ts) {
   const li = document.createElement("li");
   li.className = role;
-  li.textContent = `${role === "user" ? "Bạn" : "Mèo"}: ${text}`;
+  const label = document.createElement("span");
+  label.className = "chat-text";
+  const prefix = role === "user" ? "Bạn" : "Mèo";
+  const when = ts ? ` (${formatClock(ts)})` : "";
+  label.textContent = `${prefix}: ${text}${when}`;
+  li.appendChild(label);
+  if (role === "user" && audioId) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "play-clip";
+    btn.title = "Nghe lại mic";
+    btn.setAttribute("aria-label", "Nghe lại mic");
+    setClipIcon(btn, false);
+    btn.addEventListener("click", () => toggleClip(btn, audioId));
+    li.appendChild(btn);
+  }
   chatLog.prepend(li);
+}
+
+let clipPlayer = null;
+let clipPlayingBtn = null;
+
+const ICON_PLAY =
+  '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M8 5v14l11-7z"/></svg>';
+const ICON_STOP =
+  '<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><rect fill="currentColor" x="6" y="6" width="12" height="12" rx="2"/></svg>';
+
+function setClipIcon(btn, playing) {
+  btn.innerHTML = playing ? ICON_STOP : ICON_PLAY;
+  btn.classList.toggle("playing", playing);
+}
+
+function resetClipButton(btn) {
+  if (!btn) return;
+  setClipIcon(btn, false);
+}
+
+function toggleClip(btn, audioId) {
+  if (clipPlayer && clipPlayingBtn === btn && !clipPlayer.paused) {
+    clipPlayer.pause();
+    clipPlayer.currentTime = 0;
+    resetClipButton(btn);
+    return;
+  }
+  if (clipPlayer) {
+    clipPlayer.pause();
+    resetClipButton(clipPlayingBtn);
+  }
+  clipPlayer = new Audio(`/api/clips/${encodeURIComponent(audioId)}`);
+  clipPlayingBtn = btn;
+  setClipIcon(btn, true);
+  clipPlayer.onended = () => resetClipButton(btn);
+  clipPlayer.onerror = () => {
+    addLog("Không phát được bản ghi mic", "err");
+    resetClipButton(btn);
+  };
+  clipPlayer.play().catch((err) => {
+    addLog(String(err), "err");
+    resetClipButton(btn);
+  });
 }
 
 function setDeviceOnline(online) {
@@ -58,10 +146,14 @@ function setHum(v) {
   humidityEl.textContent = `${lastHum.toFixed(0)} %`;
 }
 
-function pushSample(now = Date.now()) {
-  history.push({ t: now, temp: lastTemp, hum: lastHum });
-  const cut = now - WINDOW_MS - SAMPLE_MS;
-  while (history.length && history[0].t < cut) history.shift();
+function isLiveWindow() {
+  if (chartWindow !== "custom") return true;
+  return customToMs == null || customToMs >= Date.now() - 5000;
+}
+
+function pushPoint(t, temp, hum) {
+  if (temp == null && hum == null) return;
+  history.push({ t, temp, hum });
 }
 
 function applySnapshot(msg) {
@@ -70,10 +162,6 @@ function applySnapshot(msg) {
   if (msg.temp != null) setTemp(msg.temp);
   if (msg.humidity != null) setHum(msg.humidity);
   sessionEl.textContent = msg.session_id ? `phiên ${msg.session_id}` : "phiên —";
-  if (deviceOnline && (lastTemp != null || lastHum != null)) {
-    pushSample();
-    drawChart();
-  }
 }
 
 function niceRange(min, max, fallbackMin, fallbackMax) {
@@ -98,7 +186,12 @@ function mapY(v, yMin, yMax, y0, y1) {
   return y1 - ((v - yMin) / (yMax - yMin)) * (y1 - y0);
 }
 
-function drawSeries(ctx, pts, key, yMin, yMax, x0, x1, y0, y1, t0, t1, stroke, fill) {
+function cssVar(name, fallback) {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return v || fallback;
+}
+
+function drawSeries(ctx, pts, key, yMin, yMax, x0, x1, y0, y1, t0, t1, stroke, fill, dash) {
   const usable = pts.filter((p) => p[key] != null);
   if (usable.length < 1) return;
   ctx.beginPath();
@@ -112,11 +205,14 @@ function drawSeries(ctx, pts, key, yMin, yMax, x0, x1, y0, y1, t0, t1, stroke, f
   const lastX = mapX(last.t, t0, t1, x0, x1);
   const lastY = mapY(last[key], yMin, yMax, y0, y1);
   if (fill) {
+    ctx.save();
+    ctx.setLineDash([]);
     ctx.lineTo(lastX, y1);
     ctx.lineTo(mapX(usable[0].t, t0, t1, x0, x1), y1);
     ctx.closePath();
     ctx.fillStyle = fill;
     ctx.fill();
+    ctx.restore();
     ctx.beginPath();
     usable.forEach((p, i) => {
       const x = mapX(p.t, t0, t1, x0, x1);
@@ -125,13 +221,16 @@ function drawSeries(ctx, pts, key, yMin, yMax, x0, x1, y0, y1, t0, t1, stroke, f
       else ctx.lineTo(x, y);
     });
   }
+  ctx.setLineDash(dash || []);
   ctx.strokeStyle = stroke;
-  ctx.lineWidth = 1.8;
+  ctx.lineWidth = 2.2;
   ctx.lineJoin = "round";
+  ctx.lineCap = "round";
   ctx.stroke();
+  ctx.setLineDash([]);
   ctx.fillStyle = stroke;
   ctx.beginPath();
-  ctx.arc(lastX, lastY, 3.2, 0, Math.PI * 2);
+  ctx.arc(lastX, lastY, 3.4, 0, Math.PI * 2);
   ctx.fill();
 }
 
@@ -155,29 +254,33 @@ function drawChart() {
   const x1 = w - pad.r;
   const y0 = pad.t;
   const y1 = h - pad.b;
-  const now = Date.now();
-  const t1 = now;
-  const t0 = now - WINDOW_MS;
+  const t1 = isLiveWindow() ? Date.now() : chartToMs;
+  const t0 = chartWindow === "custom" ? chartFromMs : t1 - (RANGE_MS[chartWindow] || RANGE_MS["15m"]);
+  const tempColor = cssVar("--color-temp", "#0f766e");
+  const humColor = cssVar("--color-hum", "#2563eb");
+  const muted = cssVar("--color-muted-foreground", "#475569");
 
-  ctx.fillStyle = "#0e1016";
-  ctx.fillRect(0, 0, w, h);
-
-  ctx.strokeStyle = "#2a3140";
+  ctx.strokeStyle = "rgba(148, 163, 184, 0.35)";
   ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.rect(x0, y0, x1 - x0, y1 - y0);
   ctx.stroke();
 
-  const temps = history.map((p) => p.temp).filter((v) => v != null);
-  const hums = history.map((p) => p.hum).filter((v) => v != null);
+  const visible = history.filter((p) => p.t >= t0 && p.t <= t1);
+  if (isLiveWindow() && visible.length && (lastTemp != null || lastHum != null)) {
+    const last = visible[visible.length - 1];
+    if (t1 - last.t > 800) visible.push({ t: t1, temp: lastTemp, hum: lastHum });
+  }
+  const temps = visible.map((p) => p.temp).filter((v) => v != null);
+  const hums = visible.map((p) => p.hum).filter((v) => v != null);
   const tRange = niceRange(Math.min(...temps), Math.max(...temps), 15, 35);
   const hRange = niceRange(Math.min(...hums), Math.max(...hums), 30, 80);
 
-  ctx.font = "11px Segoe UI, system-ui, sans-serif";
-  ctx.fillStyle = "#9aa3b2";
+  ctx.font = "600 11px Inter, \"Be Vietnam Pro\", system-ui, sans-serif";
+  ctx.fillStyle = muted;
   for (let i = 0; i <= 4; i++) {
     const y = y0 + ((y1 - y0) * i) / 4;
-    ctx.strokeStyle = "#1c2230";
+    ctx.strokeStyle = "rgba(148, 163, 184, 0.22)";
     ctx.beginPath();
     ctx.moveTo(x0, y);
     ctx.lineTo(x1, y);
@@ -185,28 +288,26 @@ function drawChart() {
     const tv = tRange.max - ((tRange.max - tRange.min) * i) / 4;
     const hv = hRange.max - ((hRange.max - hRange.min) * i) / 4;
     ctx.textAlign = "right";
-    ctx.fillStyle = "#c8e07a";
+    ctx.fillStyle = tempColor;
     ctx.fillText(tv.toFixed(1), x0 - 6, y + 3);
     ctx.textAlign = "left";
-    ctx.fillStyle = "#7cb7ff";
+    ctx.fillStyle = humColor;
     ctx.fillText(hv.toFixed(0), x1 + 6, y + 3);
   }
 
-  ctx.fillStyle = "#9aa3b2";
+  ctx.fillStyle = muted;
   ctx.textAlign = "center";
+  const span = t1 - t0;
   for (let i = 0; i <= 3; i++) {
-    const t = t0 + ((t1 - t0) * i) / 3;
+    const t = t0 + (span * i) / 3;
     const x = mapX(t, t0, t1, x0, x1);
-    const d = new Date(t);
-    const label = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`;
-    ctx.fillText(label, x, h - 6);
+    ctx.fillText(formatTick(t, span), x, h - 6);
   }
 
-  const visible = history.filter((p) => p.t >= t0);
   if (visible.length === 0) {
-    ctx.fillStyle = "#9aa3b2";
+    ctx.fillStyle = muted;
     ctx.textAlign = "center";
-    ctx.fillText(deviceOnline ? "Chờ cảm biến DHT…" : "ESP offline — chờ kết nối", (x0 + x1) / 2, (y0 + y1) / 2);
+    ctx.fillText("Chưa có dữ liệu trong khoảng này", (x0 + x1) / 2, (y0 + y1) / 2);
     return;
   }
 
@@ -214,16 +315,35 @@ function drawChart() {
   ctx.beginPath();
   ctx.rect(x0, y0, x1 - x0, y1 - y0);
   ctx.clip();
-  drawSeries(ctx, visible, "hum", hRange.min, hRange.max, x0, x1, y0, y1, t0, t1, "#7cb7ff", "rgba(124,183,255,0.12)");
-  drawSeries(ctx, visible, "temp", tRange.min, tRange.max, x0, x1, y0, y1, t0, t1, "#c8e07a", "rgba(200,224,122,0.14)");
+  drawSeries(
+    ctx, visible, "hum", hRange.min, hRange.max, x0, x1, y0, y1, t0, t1,
+    humColor, "rgba(37, 99, 235, 0.10)", [7, 5],
+  );
+  drawSeries(
+    ctx, visible, "temp", tRange.min, tRange.max, x0, x1, y0, y1, t0, t1,
+    tempColor, "rgba(15, 118, 110, 0.12)", [],
+  );
   ctx.restore();
+}
+
+function formatTick(t, span) {
+  const d = new Date(t);
+  const pad = (n) => String(n).padStart(2, "0");
+  if (span <= 15 * 60 * 1000) {
+    return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  }
+  if (span <= 3 * 60 * 60 * 1000) {
+    return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 function applyTelemetry(msg) {
   if (msg.temp != null) setTemp(msg.temp);
   if (msg.humidity != null) setHum(msg.humidity);
   if (msg.state) stateEl.textContent = msg.state;
-  pushSample();
+  const t = msg.ts || Date.now();
+  if (isLiveWindow()) pushPoint(t, lastTemp, lastHum);
   drawChart();
 }
 
@@ -281,10 +401,10 @@ function connectMonitor() {
         else stopListenBar();
         break;
       case "log":
-        addLog(msg.message, msg.level === "error" ? "err" : "");
+        addLog(msg.message, msg.level === "error" ? "err" : "", msg.ts);
         break;
       case "chat":
-        addChat(msg.role, msg.text);
+        addChat(msg.role, msg.text, msg.audio_id, msg.ts);
         break;
       default:
         break;
@@ -331,6 +451,98 @@ async function refreshHealth() {
   }
 }
 
+function toLocalInput(ms) {
+  const d = new Date(ms);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function parseLocalInput(el) {
+  const v = el.value;
+  if (!v) return null;
+  const ms = new Date(v).getTime();
+  return Number.isFinite(ms) ? ms : null;
+}
+
+async function loadTelemetry() {
+  const params = chartWindow === "custom" && customFromMs != null && customToMs != null
+    ? `from_ms=${customFromMs}&to_ms=${customToMs}`
+    : `window=${encodeURIComponent(chartWindow)}`;
+  const r = await fetch(`/api/history/telemetry?${params}`, { cache: "no-store" });
+  if (!r.ok) throw new Error(`telemetry ${r.status}`);
+  const data = await r.json();
+  history.length = 0;
+  for (const p of data.points || []) {
+    history.push({ t: p.t, temp: p.temp, hum: p.humidity });
+  }
+  chartFromMs = data.from_ms;
+  chartToMs = data.to_ms;
+  chartWindowLabel.textContent = RANGE_LABEL[chartWindow] || chartWindow;
+  drawChart();
+}
+
+async function loadChatHistory() {
+  const r = await fetch("/api/history/chat?limit=400", { cache: "no-store" });
+  if (!r.ok) return;
+  const data = await r.json();
+  chatLog.innerHTML = "";
+  for (const item of data.items || []) {
+    addChat(item.role, item.text, item.audio_id, item.ts);
+  }
+}
+
+async function loadLogHistory() {
+  const r = await fetch("/api/history/logs?limit=400", { cache: "no-store" });
+  if (!r.ok) return;
+  const data = await r.json();
+  eventLog.innerHTML = "";
+  for (const item of data.items || []) {
+    addLog(item.message, item.level === "error" ? "err" : "", item.ts);
+  }
+}
+
+async function loadHistory() {
+  try {
+    await Promise.all([loadTelemetry(), loadChatHistory(), loadLogHistory()]);
+  } catch (err) {
+    addLog(String(err), "err");
+  }
+}
+
+function setChartWindow(next) {
+  chartWindow = next;
+  chartRanges.querySelectorAll("button").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.window === next);
+  });
+  customRange.classList.toggle("hidden", next !== "custom");
+  if (next === "custom") {
+    const now = Date.now();
+    if (!chartFromEl.value) chartFromEl.value = toLocalInput(now - RANGE_MS["1h"]);
+    if (!chartToEl.value) chartToEl.value = toLocalInput(now);
+    return;
+  }
+  loadTelemetry().catch((err) => addLog(String(err), "err"));
+}
+
+chartRanges.addEventListener("click", (ev) => {
+  const btn = ev.target.closest("button[data-window]");
+  if (!btn) return;
+  setChartWindow(btn.dataset.window);
+});
+
+chartApply.addEventListener("click", () => {
+  const fromMs = parseLocalInput(chartFromEl);
+  const toMs = parseLocalInput(chartToEl);
+  if (fromMs == null || toMs == null || toMs <= fromMs) {
+    addLog("Khoảng tùy chọn không hợp lệ", "err");
+    return;
+  }
+  customFromMs = fromMs;
+  customToMs = toMs;
+  chartWindow = "custom";
+  loadTelemetry().catch((err) => addLog(String(err), "err"));
+});
+
 chatForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   const text = chatInput.value.trim();
@@ -354,15 +566,14 @@ chatForm.addEventListener("submit", async (e) => {
   }
 });
 
-connectMonitor();
+loadHistory().finally(() => connectMonitor());
 refreshHealth();
 checkFrontendVersion();
 setInterval(refreshHealth, 10000);
 setInterval(checkFrontendVersion, VERSION_POLL_MS);
 setInterval(() => {
-  if (deviceOnline && (lastTemp != null || lastHum != null)) pushSample();
-  drawChart();
-}, SAMPLE_MS);
+  if (isLiveWindow()) drawChart();
+}, 1000);
 window.addEventListener("resize", drawChart);
 if (window.ResizeObserver) {
   new ResizeObserver(drawChart).observe(chartCanvas.parentElement);

@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import time
 import uuid
 from typing import Any
 
 from fastapi import WebSocket
 
 from .config import settings
+from .store import db
 
 log = logging.getLogger("meobot.hub")
 
@@ -87,6 +90,12 @@ class Hub:
             log.exception("send_device_bin failed")
 
     async def broadcast(self, msg: dict[str, Any]) -> None:
+        if "ts" not in msg:
+            msg["ts"] = int(time.time() * 1000)
+        try:
+            await asyncio.to_thread(self._persist, msg)
+        except Exception:
+            log.exception("persist failed")
         dead: list[WebSocket] = []
         payload = json.dumps(msg, ensure_ascii=False)
         for ws in self.monitors:
@@ -96,6 +105,41 @@ class Hub:
                 dead.append(ws)
         for ws in dead:
             self.monitors.discard(ws)
+
+    def _persist(self, msg: dict[str, Any]) -> None:
+        kind = msg.get("type")
+        ts = int(msg.get("ts") or time.time() * 1000)
+        if kind == "chat":
+            db().insert_chat(
+                ts,
+                str(msg.get("role") or ""),
+                str(msg.get("text") or ""),
+                msg.get("audio_id"),
+            )
+        elif kind == "log":
+            level = str(msg.get("level") or "info")
+            if level == "debug":
+                return
+            db().insert_log(ts, level, str(msg.get("message") or ""))
+        elif kind == "telemetry":
+            temp = msg.get("temp")
+            humidity = msg.get("humidity")
+            try:
+                temp_f = float(temp) if temp is not None else None
+            except (TypeError, ValueError):
+                temp_f = None
+            try:
+                hum_f = float(humidity) if humidity is not None else None
+            except (TypeError, ValueError):
+                hum_f = None
+            db().insert_telemetry(
+                ts,
+                temp_f,
+                hum_f,
+                str(msg.get("state") or self.state or ""),
+                self.device_online,
+                self.session_id,
+            )
 
     async def log(self, level: str, message: str) -> None:
         await self.broadcast({"type": "log", "level": level, "message": message})

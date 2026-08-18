@@ -118,13 +118,15 @@ class OllamaSession:
         return await self._chat_plain(text, num_predict)
 
     def _cursor_prompt(self, text: str, web_context: str | None) -> str:
+        from .config import COMPOSE_SYSTEM_PROMPT_VI, CURSOR_VI_DIACRITICS_RULE
+
         if web_context and web_context.strip():
-            from .config import COMPOSE_SYSTEM_PROMPT_VI
             from .context import compose_from_facts
 
             return (
                 f"{COMPOSE_SYSTEM_PROMPT_VI}\n\n"
-                f"{compose_from_facts(text, web_context)}"
+                f"{compose_from_facts(text, web_context)}\n\n"
+                f"{CURSOR_VI_DIACRITICS_RULE}"
             )
         lines = [build_system_prompt()]
         for msg in self._messages[1:]:
@@ -132,6 +134,7 @@ class OllamaSession:
             lines.append(f"{role}: {msg.get('content') or ''}")
         lines.append(f"Người dùng: {text}")
         lines.append("Chỉ nói câu trả lời. Không dùng tool, không đọc file, không sửa code.")
+        lines.append(CURSOR_VI_DIACRITICS_RULE)
         return "\n".join(lines)
 
     async def _chat_cursor(self, text: str, web_context: str | None) -> str:

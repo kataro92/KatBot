@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.config import settings
+from app.config import CURSOR_VI_DIACRITICS_RULE, settings
 from app.cursor_cli import CursorCliError, _parse_print_json, find_agent_argv
 from app.ollama_session import OllamaSession
 
@@ -45,6 +45,17 @@ def test_parse() -> int:
     except CursorCliError:
         fail += _check(True, "parse is_error")
     fail += _check(_parse_print_json("chi la text")[0] == "chi la text", "parse plain text")
+    return fail
+
+
+def test_cursor_prompt_requires_diacritics() -> int:
+    fail = 0
+    session = OllamaSession()
+    chat = session._cursor_prompt("xin chào", None)
+    fail += _check(chat.rstrip().endswith(CURSOR_VI_DIACRITICS_RULE), "diacritics rule last in chat prompt")
+    fail += _check("tiếng Việt có dấu" in chat, "chat prompt says co dau")
+    compose = session._cursor_prompt("thời tiết Hà Nội", "- 26°C")
+    fail += _check(compose.rstrip().endswith(CURSOR_VI_DIACRITICS_RULE), "diacritics rule last in compose prompt")
     return fail
 
 
@@ -92,6 +103,7 @@ async def _fallback_and_cursor() -> int:
 def main() -> int:
     fail = 0
     fail += test_parse()
+    fail += test_cursor_prompt_requires_diacritics()
     fail += test_find_agent()
     fail += asyncio.run(_fallback_and_cursor())
     if fail:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from .clips import put_pcm
 from .hub import hub
 from .ollama_session import OllamaError, OllamaSession
 from .stt import transcribe
@@ -19,12 +20,20 @@ PCM_CHUNK = 1024  # bytes; keep under WebSockets 2KB cap
 PREFILL_CHUNKS = 4  # ~128 ms so ESP ring is primed before realtime pacing
 
 
-async def handle_user_text(session: OllamaSession, text: str) -> str:
+async def handle_user_text(
+    session: OllamaSession,
+    text: str,
+    *,
+    audio_id: str | None = None,
+) -> str:
     user = (text or "").strip()
     if not user:
         return ""
     async with _lock:
-        await hub.broadcast({"type": "chat", "role": "user", "text": user})
+        user_msg: dict = {"type": "chat", "role": "user", "text": user}
+        if audio_id:
+            user_msg["audio_id"] = audio_id
+        await hub.broadcast(user_msg)
         try:
             tool = await asyncio.to_thread(
                 run_tools, user, search_enabled=settings.web_search_enabled
@@ -135,4 +144,5 @@ async def on_listen_stop(session: OllamaSession) -> None:
         await hub.set_state("idle")
         return
     await hub.log("info", f"STT: {text}")
-    await handle_user_text(session, text)
+    audio_id = put_pcm(pcm, 8000)
+    await handle_user_text(session, text, audio_id=audio_id)

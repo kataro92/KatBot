@@ -1,6 +1,9 @@
 .env
 firmware/KatBot/secrets.h
-backend/.venv
+backend/data/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
 backend/__pycache__/
 backend/app/__pycache__/
 **/__pycache__/

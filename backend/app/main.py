@@ -6,8 +6,8 @@ import asyncio
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.types import Scope
 from pydantic import BaseModel, Field
@@ -16,7 +16,9 @@ from .config import WEB_DIR, settings
 from .hub import hub
 from .ollama_session import OllamaError, OllamaSession
 from .cursor_cli import CursorCliError, probe_cursor_cli
+from .clips import get_pcm, pcm16_to_wav
 from .pipeline import handle_user_text, on_listen_stop
+from .store import close_store, db, init_store, window_bounds
 from . import stt as stt_mod
 from .version import web_asset_version
 
@@ -61,6 +63,7 @@ def _stt_model_label() -> str:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    await asyncio.to_thread(init_store, settings.db_path)
     if settings.cursor_cli_enabled:
         try:
             await asyncio.to_thread(probe_cursor_cli)
@@ -91,6 +94,7 @@ async def lifespan(_app: FastAPI):
         await hub.log("warn", f"STT chua san sang: {exc}")
     yield
     await session.close()
+    await asyncio.to_thread(close_store)
 
 
 app = FastAPI(title="Mèo Bot", lifespan=lifespan)
@@ -125,6 +129,45 @@ async def health() -> dict[str, Any]:
         "stt_model": _stt_model_label(),
         "version": web_asset_version(),
     }
+
+
+@app.get("/api/history/telemetry")
+async def history_telemetry(
+    window: str = "15m",
+    from_ms: int | None = None,
+    to_ms: int | None = None,
+) -> dict[str, Any]:
+    try:
+        start, end = window_bounds(window, from_ms, to_ms)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    points = await asyncio.to_thread(db().telemetry, start, end)
+    return {"from_ms": start, "to_ms": end, "points": points}
+
+
+@app.get("/api/history/chat")
+async def history_chat(limit: int = 300) -> dict[str, Any]:
+    items = await asyncio.to_thread(db().chat, limit=limit)
+    return {"items": items}
+
+
+@app.get("/api/history/logs")
+async def history_logs(limit: int = 300) -> dict[str, Any]:
+    items = await asyncio.to_thread(db().logs, limit=limit)
+    return {"items": items}
+
+
+@app.get("/api/clips/{clip_id}")
+async def clip_wav(clip_id: str) -> Response:
+    item = get_pcm(clip_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="clip not found")
+    pcm, hz = item
+    return Response(
+        content=pcm16_to_wav(pcm, hz),
+        media_type="audio/wav",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.post("/api/chat")

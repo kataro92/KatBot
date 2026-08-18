@@ -29,4 +29,4 @@ Local voice chatbot (**Mèo Bot**) on ESP-12F / NodeMCU. The chip is a thin clie
 3. Open http://127.0.0.1:8080
 4. Copy `firmware/KatBot/secrets.h.example` → `secrets.h`, set Wi-Fi and the PC LAN IP, flash NodeMCU 1.0.
 
-Current stage: full talk loop is live (listen → STT → tools/LLM → speaker), with a chibi OLED UI and a PC monitor.
+Current stage: full talk loop is live (listen → STT → tools/LLM → speaker), with a chibi OLED UI and a pastel glass PC monitor (SQLite history, tiếng Việt có dấu).

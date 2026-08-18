@@ -38,6 +38,7 @@ Ollama should already be running. Cursor CLI is optional; if it is missing, chat
 | `WEB_SEARCH_ENABLED` | `true` | Tools + web lookup |
 | `WEATHER_CITY` | `Ha Noi` | Default outdoor city |
 | `GOOGLE_API_KEY` / `GOOGLE_CSE_ID` | (empty) | Optional Custom Search; otherwise Startpage/Brave/DDG |
+| `DB_PATH` | `backend/data/katbot.sqlite` | SQLite history (telemetry, chat, logs) |
 
 `ELEVENLABS_API_KEY` is required only for `STT_ENGINE=elevenlabs`. Do not commit `.env`.
 
@@ -60,12 +61,16 @@ Indoor “how warm is it here” uses the DHT11 reading injected into the system
 | `/api/health` | Ollama, Cursor CLI, STT, device, DHT, listen window |
 | `/api/chat` | Same pipeline as a spoken turn |
 | `/api/version` | Web asset fingerprint (cache bust) |
+| `/api/history/telemetry` | DHT chart points (`window=` or `from_ms`/`to_ms`) |
+| `/api/history/chat` | Persisted chat |
+| `/api/history/logs` | Persisted event log |
+| `/api/clips/{id}` | WAV playback of a spoken user clip |
 | `/ws/device` | ESP-12F (JSON + PCM) |
 | `/ws/monitor` | Browsers (fan-out only) |
 
 ## Monitor
 
-The dashboard shows ESP online/offline, a 3-minute DHT chart, the listen countdown, chat, and the event log. It never opens a socket to the chip.
+Pastel glass dashboard (`web/`): frost cards, blush/mint/lavender wash, **Be Vietnam Pro** headings and **Inter** body (both have a Vietnamese subset). It shows ESP online/offline, a DHT chart (1 phút / 15 phút / 1–12 tiếng / 1 ngày / tùy chọn; temperature solid, humidity dashed), the listen countdown, chat bubbles, and the event log. Spoken user lines get a play button (`/api/clips`). Chat, logs, and telemetry are stored in SQLite (`DB_PATH`) and reloaded after refresh. The browser never opens a socket to the chip.
 
 ## Tests
 
@@ -73,6 +78,7 @@ From `backend/` with the project venv:
 
 ```
 .venv\Scripts\python.exe test_api.py
+.venv\Scripts\python.exe test_store.py
 .venv\Scripts\python.exe test_context.py
 .venv\Scripts\python.exe test_web_search.py
 .venv\Scripts\python.exe test_tools.py

@@ -31,7 +31,9 @@ The browser talks only to the PC. It never loads the ESP.
 - Tools when the utterance needs them: indoor DHT11, outdoor weather, USD/VND, Wikipedia/news/web, short music clips
 - TTS (gTTS, Vietnamese) plays on the MAX98357; music clips use the same I2S path
 - OLED chibi cat UI with status (`idle` / `nghe` / `nghi` / `noi`) plus temperature / humidity
-- Web dashboard: device online, DHT chart, listen bar, event log, text chat that also speaks on the ESP
+- Replies are **tiếng Việt có dấu** (Cursor CLI and Ollama prompts require diacritics)
+- Web monitor (pastel glass UI, [Be Vietnam Pro](https://fonts.google.com/specimen/Be+Vietnam+Pro) + [Inter](https://fonts.google.com/specimen/Inter)): ESP status, DHT chart with ranges (1 phút → 1 ngày, or custom), listen bar, chat bubbles, event log. Spoken user lines have a play button. Typed chat uses the same pipeline and speaks on the ESP when it is online
+- SQLite history (`backend/data/katbot.sqlite`) keeps telemetry, chat, and logs across refresh
 
 Device states: `idle` → `listening` (timer on the chip) → `thinking` → `speaking` → `idle`. Extra presses while busy are ignored (no barge-in).
 
@@ -75,10 +77,11 @@ Battery: feed **regulated 5 V into `Vin`**, not 3.7 V into `3V3`. See [Wiki → 
 KatBot/
   start.bat         Start backend (venv + deps + server)
   compile.bat       Compile firmware with arduino-cli
-  backend/          FastAPI (device WS, monitor WS, STT, LLM, TTS, tools)
+  backend/          FastAPI (device WS, monitor WS, STT, LLM, TTS, tools, SQLite)
   firmware/KatBot/  Arduino sketch for NodeMCU
   firmware/tools/   OLED sprite generator (`ref_cat.png` → `cat_bitmaps.h`)
-  web/              Monitor UI (served by the backend)
+  web/              Monitor UI (pastel glass, served by the backend)
+  design-system/    UI tokens for the monitor (glass + Vietnamese fonts)
   docs/             Architecture and wiring diagrams
   wiki-src/         GitHub Wiki source
   .env.example      Backend settings (no secrets)
@@ -97,7 +100,7 @@ KatBot/
 
 Double-click [`start.bat`](start.bat) in the repo root. It creates `backend/.venv` if needed, installs missing packages, copies `.env` from `.env.example` when absent, then starts the server.
 
-Open [http://127.0.0.1:8080](http://127.0.0.1:8080) (or `http://<pc-lan-ip>:8080`). Use the text box to confirm chat before flashing. Typed chat uses the same pipeline as the mic, including TTS on the speaker when the ESP is online.
+Open [http://127.0.0.1:8080](http://127.0.0.1:8080) (or `http://<pc-lan-ip>:8080`). The monitor is a frosted-glass dashboard served by the backend; the browser never talks to the ESP. Use the text box to confirm chat before flashing. Typed chat uses the same pipeline as the mic, including TTS on the speaker when the ESP is online. After a restart, the chart, chat, and log reload from SQLite.
 
 Ollama must already be running. On startup the backend preloads the model (`keep_alive=-1`) and warms STT.
 
@@ -116,6 +119,7 @@ Useful env vars (repo-root `.env`):
 | `TTS_ENGINE` | `gtts` | Vietnamese speech via gTTS |
 | `WEB_SEARCH_ENABLED` | `true` | Weather / FX / Wikipedia / news / web |
 | `WEATHER_CITY` | `Ha Noi` | Default city when none is named |
+| `DB_PATH` | `backend/data/katbot.sqlite` | SQLite history (telemetry, chat, logs) |
 
 Do not commit `.env` or API keys. More: [Wiki → Backend](https://github.com/kataro92/KatBot/wiki/Backend).
 

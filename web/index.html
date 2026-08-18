@@ -5,13 +5,32 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Mèo Bot — monitor</title>
     <meta http-equiv="Cache-Control" content="no-store" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Inter:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap"
+    />
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
-    <header>
-      <div>
-        <h1>Mèo Bot</h1>
-        <p class="sub">Monitor trên PC — không tăng tải ESP-12F</p>
+    <div class="blobs" aria-hidden="true">
+      <span class="blob blob-a"></span>
+      <span class="blob blob-b"></span>
+      <span class="blob blob-c"></span>
+    </div>
+
+    <header class="glass bar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 32 32" width="32" height="32">
+            <path fill="currentColor" d="M8 8l-3-5 7 3h8l7-3-3 5c3 3 5 7 5 11 0 6-6 11-13 11S3 25 3 19c0-4 2-8 5-11zm4 9a2 2 0 110-4 2 2 0 010 4zm8 0a2 2 0 110-4 2 2 0 010 4z"/>
+          </svg>
+        </span>
+        <div>
+          <h1>Mèo Bot</h1>
+          <p class="sub">Monitor trên PC — không tăng tải ESP-12F</p>
+        </div>
       </div>
       <div class="pills">
         <span id="ollamaPill" class="pill">Ollama …</span>
@@ -20,9 +39,14 @@
     </header>
 
     <main>
-      <section class="card wide device-card">
+      <section class="glass card wide device-card">
         <div class="device-head">
-          <h2>Thiết bị</h2>
+          <h2>
+            <svg class="sec-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+              <path fill="currentColor" d="M4 7h16v10H4V7zm2 2v6h12V9H6zm6 12a2 2 0 110-4 2 2 0 010 4z"/>
+            </svg>
+            Thiết bị
+          </h2>
           <span id="session" class="session-id">phiên —</span>
         </div>
         <div class="metrics">
@@ -39,12 +63,28 @@
             <span id="humidity" class="metric-value">—</span>
           </div>
         </div>
+        <div class="chart-toolbar">
+          <div class="chart-ranges" id="chartRanges" role="tablist" aria-label="Khung thời gian biểu đồ">
+            <button type="button" data-window="1m">1 phút</button>
+            <button type="button" data-window="15m" class="active">15 phút</button>
+            <button type="button" data-window="1h">1 tiếng</button>
+            <button type="button" data-window="3h">3 tiếng</button>
+            <button type="button" data-window="12h">12 tiếng</button>
+            <button type="button" data-window="1d">1 ngày</button>
+            <button type="button" data-window="custom">Tùy chọn</button>
+          </div>
+          <div id="customRange" class="custom-range hidden">
+            <label>Từ <input id="chartFrom" type="datetime-local" step="60" /></label>
+            <label>Đến <input id="chartTo" type="datetime-local" step="60" /></label>
+            <button type="button" id="chartApply">Xem</button>
+          </div>
+        </div>
         <div class="chart-wrap">
           <canvas id="deviceChart" width="800" height="220"></canvas>
           <div class="chart-legend">
-            <span class="leg leg-temp">Nhiệt độ °C</span>
-            <span class="leg leg-hum">Độ ẩm %</span>
-            <span class="chart-window">cửa sổ 3 phút · realtime</span>
+            <span class="leg leg-temp">Nhiệt độ °C (nét liền)</span>
+            <span class="leg leg-hum">Độ ẩm % (nét đứt)</span>
+            <span id="chartWindowLabel" class="chart-window">15 phút</span>
           </div>
         </div>
         <div id="listenBar" class="listen-bar hidden">
@@ -53,18 +93,29 @@
         </div>
       </section>
 
-      <section class="card">
-        <h2>Chat (text + giọng)</h2>
+      <section class="glass card">
+        <h2>
+          <svg class="sec-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+            <path fill="currentColor" d="M4 4h16v12H7l-3 3V4zm4 4v2h8V8H8zm0 4v2h5v-2H8z"/>
+          </svg>
+          Chat
+        </h2>
         <p class="hint">Cùng một phiên: nói trên ESP hoặc gõ ở đây. Câu bạn nói hiện trong bảng này; câu Mèo trả lời phát ra loa ESP.</p>
         <form id="chatForm">
+          <label class="sr-only" for="chatInput">Nhắn cho Mèo Bot</label>
           <input id="chatInput" type="text" maxlength="500" placeholder="Nhắn cho Mèo Bot…" autocomplete="off" />
           <button type="submit">Gửi</button>
         </form>
         <ul id="chatLog" class="log chat"></ul>
       </section>
 
-      <section class="card">
-        <h2>Nhật ký</h2>
+      <section class="glass card">
+        <h2>
+          <svg class="sec-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+            <path fill="currentColor" d="M6 3h12v18l-6-3-6 3V3zm2 4v2h8V7H8zm0 4v2h8v-2H8z"/>
+          </svg>
+          Nhật ký
+        </h2>
         <ul id="eventLog" class="log"></ul>
       </section>
     </main>

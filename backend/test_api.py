@@ -13,11 +13,17 @@ if str(ROOT) not in sys.path:
 from fastapi.testclient import TestClient
 import httpx
 
+from app.clips import pcm16_to_wav, put_pcm
 from app.config import settings
 from app.main import app
 from app.version import web_asset_version
 
 settings.cursor_cli_enabled = False
+_db = ROOT / "data" / "test-katbot.sqlite"
+_db.parent.mkdir(parents=True, exist_ok=True)
+for leftover in _db.parent.glob("test-katbot.sqlite*"):
+    leftover.unlink(missing_ok=True)
+settings.db_path = str(_db)
 
 FAIL = 0
 
@@ -52,18 +58,33 @@ def main() -> int:
     with TestClient(app) as client:
         client.timeout = httpx.Timeout(180.0)
         r = client.get("/")
-        ok("GET /", r.status_code == 200 and "Mèo Bot" in r.text)
+        ok("GET /", r.status_code == 200 and "Mèo Bot" in r.text and "chartRanges" in r.text)
         ok("GET / Cache-Control", "no-store" in r.headers.get("cache-control", "").lower())
 
         r = client.get("/static/app.js")
-        ok("GET /static/app.js", r.status_code == 200 and "checkFrontendVersion" in r.text)
+        ok("GET /static/app.js", r.status_code == 200 and "loadHistory" in r.text)
         ok(
             "GET /static/app.js Cache-Control",
             "no-store" in r.headers.get("cache-control", "").lower(),
         )
 
         r = client.get("/static/styles.css")
-        ok("GET /static/styles.css", r.status_code == 200 and ".pill" in r.text)
+        ok("GET /static/styles.css", r.status_code == 200 and ".play-clip" in r.text)
+
+        r = client.get("/api/clips/missing")
+        ok("GET /api/clips missing", r.status_code == 404)
+
+        cid = put_pcm(b"\x00\x00" * 400, 8000)
+        r = client.get(f"/api/clips/{cid}")
+        ok(
+            "GET /api/clips wav",
+            r.status_code == 200
+            and r.headers.get("content-type", "").startswith("audio/wav")
+            and r.content[:4] == b"RIFF"
+            and r.content[8:12] == b"WAVE"
+            and len(r.content) > 44,
+        )
+        ok("wav payload matches", r.content == pcm16_to_wav(b"\x00\x00" * 400, 8000))
 
         r = client.get("/api/version")
         body = r.json()
@@ -100,6 +121,36 @@ def main() -> int:
             "POST /api/chat",
             r.status_code == 200 and "reply" in chat and chat.get("error") == "",
             detail=str(chat),
+        )
+
+        r = client.get("/api/history/telemetry?window=15m")
+        tel = r.json() if r.status_code == 200 else {}
+        ok(
+            "GET /api/history/telemetry",
+            r.status_code == 200
+            and "points" in tel
+            and "from_ms" in tel
+            and tel["to_ms"] > tel["from_ms"],
+            detail=str(tel)[:200],
+        )
+
+        r = client.get("/api/history/telemetry?from_ms=100&to_ms=50")
+        ok("GET /api/history/telemetry bad range", r.status_code == 400)
+
+        r = client.get("/api/history/chat")
+        chats = r.json() if r.status_code == 200 else {}
+        ok(
+            "GET /api/history/chat",
+            r.status_code == 200 and isinstance(chats.get("items"), list) and len(chats["items"]) >= 2,
+            detail=str(chats)[:240],
+        )
+
+        r = client.get("/api/history/logs")
+        logs = r.json() if r.status_code == 200 else {}
+        ok(
+            "GET /api/history/logs",
+            r.status_code == 200 and isinstance(logs.get("items"), list) and len(logs["items"]) >= 1,
+            detail=str(logs)[:240],
         )
 
         with client.websocket_connect("/ws/device") as ws:
@@ -158,6 +209,15 @@ def main() -> int:
                     tel is not None and tel.get("type") == "telemetry" and tel.get("temp") == 27.0,
                     detail=str(tel),
                 )
+
+        r = client.get("/api/history/telemetry?window=1h")
+        pts = (r.json() or {}).get("points") or []
+        ok(
+            "GET history telemetry after DHT",
+            r.status_code == 200
+            and any(p.get("temp") is not None and abs(p["temp"] - 27.0) < 1.5 for p in pts),
+            detail=str(pts[-3:]),
+        )
 
         r = client.get("/no-such-page")
         ok("GET unknown 404", r.status_code == 404)
