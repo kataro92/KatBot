@@ -6,7 +6,7 @@
 #define OLED_WIDTH 128
 #define OLED_HEIGHT 64
 #define OLED_ADDR 0x3C
-#define OLED_BAR_H 9
+#define OLED_TITLE_H 11
 
 #define PIN_DHT 14          // D5
 #define PIN_LISTEN_BTN 12   // D6, active LOW
@@ -28,3 +28,8 @@
 #define PLAY_GAIN_DEN 20
 
 #define WS_PATH "/ws/device"
+
+struct ToneNote {
+  uint16_t hz;
+  uint16_t ms;
+};

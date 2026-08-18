@@ -7,6 +7,8 @@ from typing import Any
 
 from fastapi import WebSocket
 
+from .config import settings
+
 log = logging.getLogger("meobot.hub")
 
 
@@ -34,6 +36,7 @@ class Hub:
             "humidity": self.humidity,
             "session_id": self.session_id,
             "listen_ms": self.listen_ms,
+            "listen_duration_ms": settings.listen_ms,
         }
 
     async def attach_device(self, ws: WebSocket) -> str:
@@ -104,7 +107,7 @@ class Hub:
     def start_listen(self) -> None:
         self.audio.clear()
         self.listening = True
-        self.listen_ms = 5000
+        self.listen_ms = settings.listen_ms
 
     def add_audio(self, data: bytes) -> None:
         if self.listening:

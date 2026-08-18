@@ -316,11 +316,15 @@ async function refreshHealth() {
   try {
     const r = await fetch("/api/health", { cache: "no-store" });
     const h = await r.json();
-    ollamaPill.textContent = h.ollama_ready
-      ? `Ollama ${h.model}`
-      : "Ollama lỗi";
-    ollamaPill.classList.toggle("ok", !!h.ollama_ready);
-    ollamaPill.classList.toggle("bad", !h.ollama_ready);
+    ollamaPill.textContent = h.cursor_cli_ready
+      ? (h.ollama_ready
+        ? `Cursor ${h.cursor_cli_model || "Auto"} · Ollama`
+        : `Cursor ${h.cursor_cli_model || "Auto"}`)
+      : h.ollama_ready
+        ? `Ollama ${h.model}`
+        : "LLM lỗi";
+    ollamaPill.classList.toggle("ok", !!(h.cursor_cli_ready || h.ollama_ready));
+    ollamaPill.classList.toggle("bad", !(h.cursor_cli_ready || h.ollama_ready));
   } catch {
     ollamaPill.textContent = "Backend lỗi";
     ollamaPill.classList.add("bad");

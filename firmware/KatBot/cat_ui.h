@@ -13,4 +13,9 @@ enum CatMood : uint8_t {
 
 void catUiBegin();
 void catUiTick(uint32_t nowMs, CatMood mood);
-void catDraw(Adafruit_SSD1306& oled, CatMood mood, const char* barLeft, const char* barRight);
+void catDraw(
+    Adafruit_SSD1306& oled,
+    CatMood mood,
+    const char* barLeft,
+    const char* barRight,
+    uint8_t progress);

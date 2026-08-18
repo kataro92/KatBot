@@ -13,3 +13,4 @@ docs/__pycache__/
 *.elf
 *.map
 firmware/build/
+.cursor-cli-ws/

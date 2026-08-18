@@ -15,7 +15,9 @@ from pydantic import BaseModel, Field
 from .config import WEB_DIR, settings
 from .hub import hub
 from .ollama_session import OllamaError, OllamaSession
+from .cursor_cli import CursorCliError, probe_cursor_cli
 from .pipeline import handle_user_text, on_listen_stop
+from . import stt as stt_mod
 from .version import web_asset_version
 
 
@@ -38,14 +40,55 @@ log = logging.getLogger("meobot")
 session = OllamaSession()
 
 
+def _stt_engine_label() -> str:
+    try:
+        return stt_mod.stt_engine_name()
+    except ValueError:
+        return (settings.stt_engine or "").strip() or "unknown"
+
+
+def _stt_model_label() -> str:
+    try:
+        engine = stt_mod.stt_engine_name()
+    except ValueError:
+        return settings.whisper_model
+    if engine == "phowhisper":
+        return settings.phowhisper_model
+    if engine == "elevenlabs":
+        return settings.elevenlabs_stt_model or "scribe_v2"
+    return settings.whisper_model
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    if settings.cursor_cli_enabled:
+        try:
+            await asyncio.to_thread(probe_cursor_cli)
+            session.cursor_ready = True
+            session.cursor_error = None
+            await hub.log(
+                "info",
+                f"Cursor CLI ready (model {settings.cursor_cli_model})",
+            )
+        except CursorCliError as exc:
+            session.cursor_ready = False
+            session.cursor_error = str(exc)
+            log.warning("Cursor CLI not ready: %s", exc)
+            await hub.log("warn", f"Cursor CLI chua san sang, dung Ollama: {exc}")
     try:
         await session.warmup()
         await hub.log("info", f"Ollama ready ({settings.ollama_model})")
     except OllamaError as exc:
         log.warning("Starting without Ollama: %s", exc)
         await hub.log("error", f"Ollama chua san sang: {exc}")
+    log.info("Listen window %s ms", settings.listen_ms)
+    await hub.log("info", f"Listen window {settings.listen_ms} ms")
+    try:
+        await asyncio.to_thread(stt_mod._get_model)
+        await hub.log("info", f"STT ready ({stt_mod._model_label})")
+    except Exception as exc:
+        log.warning("STT warmup failed: %s", exc)
+        await hub.log("warn", f"STT chua san sang: {exc}")
     yield
     await session.close()
 
@@ -68,9 +111,18 @@ async def health() -> dict[str, Any]:
         "ok": True,
         "ollama_ready": session.ready,
         "ollama_error": session.last_error,
+        "cursor_cli_ready": session.cursor_ready,
+        "cursor_cli_error": session.cursor_error,
+        "cursor_cli_model": settings.cursor_cli_model,
         "model": settings.ollama_model,
         "device_online": hub.device_online,
         "state": hub.state,
+        "temp": hub.temp,
+        "humidity": hub.humidity,
+        "web_search": settings.web_search_enabled,
+        "listen_ms": settings.listen_ms,
+        "stt_engine": _stt_engine_label(),
+        "stt_model": _stt_model_label(),
         "version": web_asset_version(),
     }
 
@@ -94,6 +146,7 @@ async def ws_device(ws: WebSocket) -> None:
                 "type": "hello",
                 "transport": "websocket",
                 "session_id": sid,
+                "listen_ms": settings.listen_ms,
                 "audio_params": {
                     "format": "pcm",
                     "sample_rate": 8000,
@@ -130,14 +183,15 @@ async def _handle_device_json(raw: str) -> None:
     kind = msg.get("type")
     if kind == "hello":
         await hub.log("info", "Device hello")
+        await hub.send_device({"type": "config", "listen_ms": settings.listen_ms})
         await hub.broadcast({"type": "hello", "from": "device", "payload": msg})
     elif kind == "listen":
         state = msg.get("state")
         if state == "start":
             hub.start_listen()
             await hub.set_state("listening")
-            await hub.log("info", "Listen 5s start")
-            await hub.broadcast({"type": "listen", "state": "start", "ms": 5000})
+            await hub.log("info", f"Listen {settings.listen_ms}ms start")
+            await hub.broadcast({"type": "listen", "state": "start", "ms": settings.listen_ms})
         elif state == "stop":
             await hub.broadcast({"type": "listen", "state": "stop"})
             asyncio.create_task(on_listen_stop(session))

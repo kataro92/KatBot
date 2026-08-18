@@ -33,6 +33,7 @@ static float lastTemp = NAN;
 static float lastHum = NAN;
 static uint32_t lastDhtMs = 0;
 static uint32_t listenStartMs = 0;
+static uint32_t listenWindowMs = LISTEN_MS;
 static uint32_t lastOledMs = 0;
 static uint8_t btnPrev = HIGH;
 static uint32_t btnChangeMs = 0;
@@ -51,6 +52,7 @@ static uint16_t playR = 0;
 static bool i2sOn = false;
 static bool playDraining = false;
 static bool bootSinging = false;
+static const char* sfxLabel = nullptr;
 
 static const char* stateName(DeviceState s) {
   switch (s) {
@@ -81,7 +83,7 @@ static CatMood moodFromState() {
 static void renderOled() {
   if (!oledOk) return;
   lastOledMs = millis();
-  CatMood mood = bootSinging ? CAT_SPEAK : moodFromState();
+  CatMood mood = (bootSinging || sfxLabel) ? CAT_SPEAK : moodFromState();
   catUiTick(lastOledMs, mood);
 
   char left[18];
@@ -94,12 +96,14 @@ static void renderOled() {
     snprintf_P(left + 2, sizeof(left) - 2, PSTR("Meo"));
   }
 
-  if (bootSinging) {
+  if (sfxLabel) {
+    snprintf_P(right, sizeof(right), PSTR("%s"), sfxLabel);
+  } else if (bootSinging) {
     snprintf_P(right, sizeof(right), PSTR("hello"));
   } else if (gState == ST_LISTENING) {
     uint32_t leftSec = 0;
     uint32_t elapsed = millis() - listenStartMs;
-    if (elapsed < LISTEN_MS) leftSec = (LISTEN_MS - elapsed + 999) / 1000;
+    if (elapsed < listenWindowMs) leftSec = (listenWindowMs - elapsed + 999) / 1000;
     snprintf_P(right, sizeof(right), PSTR("nghe %lu"), (unsigned long)leftSec);
   } else if (gState == ST_THINKING) {
     snprintf_P(right, sizeof(right), PSTR("nghi"));
@@ -111,33 +115,30 @@ static void renderOled() {
     snprintf_P(right, sizeof(right), PSTR("idle"));
   }
 
-  catDraw(oled, mood, left, right);
+  uint8_t progress = 255;
+  if (gState == ST_LISTENING && listenWindowMs > 0) {
+    uint32_t elapsed = millis() - listenStartMs;
+    if (elapsed > listenWindowMs) elapsed = listenWindowMs;
+    progress = (uint8_t)((elapsed * 100UL) / listenWindowMs);
+  }
+
+  catDraw(oled, mood, left, right, progress);
   oled.display();
 }
 
-static void playBootJingle() {
-  struct Note {
-    uint16_t hz;
-    uint16_t ms;
-  };
-  static const Note song[] PROGMEM = {
-      {659, 160}, {784, 160}, {1047, 160}, {1319, 320}, {0, 140},
-      {1047, 160}, {784, 160}, {659, 320},  {0, 140},
-      {1319, 160}, {1568, 160}, {2093, 420},
-  };
-  const uint8_t nNotes = sizeof(song) / sizeof(song[0]);
-  bootSinging = true;
+static void playToneSong(const ToneNote* song, uint8_t nNotes, const char* label) {
+  sfxLabel = label;
   renderOled();
   if (!I2S.begin(I2S_PHILIPS_MODE, PLAY_HZ, 16)) {
-    bootSinging = false;
+    sfxLabel = nullptr;
     return;
   }
   i2sOn = true;
   int16_t buf[64];
   uint32_t lastFrame = millis();
   for (uint8_t n = 0; n < nNotes; n++) {
-    Note note;
-    memcpy_P(&note, &song[n], sizeof(Note));
+    ToneNote note;
+    memcpy_P(&note, &song[n], sizeof(ToneNote));
     uint32_t samples = ((uint32_t)PLAY_HZ * note.ms) / 1000UL;
     uint16_t half = 0;
     if (note.hz >= 40) {
@@ -145,9 +146,9 @@ static void playBootJingle() {
       if (half < 2) half = 2;
     }
     uint16_t phase = 0;
-    int16_t amp = 7200;
+    int16_t amp = 7800;
     int16_t s = amp;
-    uint32_t fade = PLAY_HZ / 80;
+    uint32_t fade = PLAY_HZ / 90;
     uint32_t i = 0;
     while (i < samples) {
       uint8_t chunk = 64;
@@ -189,7 +190,39 @@ static void playBootJingle() {
   playDraining = false;
   playW = 0;
   playR = 0;
+  sfxLabel = nullptr;
+}
+
+static void playBootJingle() {
+  static const ToneNote song[] PROGMEM = {
+      {659, 160}, {784, 160}, {1047, 160}, {1319, 320}, {0, 140},
+      {1047, 160}, {784, 160}, {659, 320},  {0, 140},
+      {1319, 160}, {1568, 160}, {2093, 420},
+  };
+  bootSinging = true;
+  playToneSong(song, sizeof(song) / sizeof(song[0]), "hello");
   bootSinging = false;
+}
+
+static void playMeo() {
+  static const ToneNote song[] PROGMEM = {
+      {740, 55}, {880, 70}, {1175, 85}, {988, 55}, {659, 130}, {0, 30},
+  };
+  playToneSong(song, sizeof(song) / sizeof(song[0]), "meo");
+}
+
+static void playMeoMeo() {
+  static const ToneNote song[] PROGMEM = {
+      {740, 50}, {880, 65}, {1175, 80}, {988, 50}, {659, 110}, {0, 90},
+      {740, 50}, {880, 65}, {1245, 85}, {988, 55}, {622, 140}, {0, 30},
+  };
+  playToneSong(song, sizeof(song) / sizeof(song[0]), "meo");
+}
+
+static void applyListenMs(int ms) {
+  if (ms < 1000) ms = 1000;
+  if (ms > 60000) ms = 60000;
+  listenWindowMs = (uint32_t)ms;
 }
 
 static void sendTxt() {
@@ -221,16 +254,18 @@ static void sendTelemetry() {
     snprintf_P(
         txbuf,
         sizeof(txbuf),
-        PSTR("{\"type\":\"telemetry\",\"state\":\"%s\"}"),
-        stateName(gState));
+        PSTR("{\"type\":\"telemetry\",\"state\":\"%s\",\"listen_ms\":%lu}"),
+        stateName(gState),
+        (unsigned long)listenWindowMs);
   } else {
     snprintf_P(
         txbuf,
         sizeof(txbuf),
-        PSTR("{\"type\":\"telemetry\",\"temp\":%.1f,\"humidity\":%.0f,\"state\":\"%s\"}"),
+        PSTR("{\"type\":\"telemetry\",\"temp\":%.1f,\"humidity\":%.0f,\"state\":\"%s\",\"listen_ms\":%lu}"),
         lastTemp,
         lastHum,
-        stateName(gState));
+        stateName(gState),
+        (unsigned long)listenWindowMs);
   }
   sendTxt();
 }
@@ -352,6 +387,7 @@ static void startListen() {
     return;
   }
   stopI2s();
+  playMeo();
   listenStartMs = millis();
   micCount = 0;
   nextMicUs = micros();
@@ -366,6 +402,8 @@ static void finishListen() {
   gState = ST_THINKING;
   sendListen("stop");
   sendTelemetry();
+  renderOled();
+  playMeoMeo();
   renderOled();
 }
 
@@ -414,9 +452,16 @@ static void onJson(const char* json) {
       strncpy(sessionId, sid, sizeof(sessionId) - 1);
       sessionId[sizeof(sessionId) - 1] = 0;
     }
+    if (!doc["listen_ms"].isNull()) {
+      applyListenMs(doc["listen_ms"].as<int>());
+    }
     wsReady = true;
     setState(ST_IDLE);
     sendTelemetry();
+  } else if (strcmp(type, "config") == 0) {
+    if (!doc["listen_ms"].isNull()) {
+      applyListenMs(doc["listen_ms"].as<int>());
+    }
   } else if (strcmp(type, "state") == 0) {
     const char* value = doc["value"];
     if (value && strcmp(value, "idle") == 0) {
@@ -535,7 +580,7 @@ void loop() {
   sampleMic();
 
   if (gState == ST_LISTENING) {
-    if (millis() - listenStartMs >= LISTEN_MS) {
+    if (millis() - listenStartMs >= listenWindowMs) {
       finishListen();
     }
   }

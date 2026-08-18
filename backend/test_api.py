@@ -13,8 +13,11 @@ if str(ROOT) not in sys.path:
 from fastapi.testclient import TestClient
 import httpx
 
+from app.config import settings
 from app.main import app
 from app.version import web_asset_version
+
+settings.cursor_cli_enabled = False
 
 FAIL = 0
 
@@ -75,6 +78,11 @@ def main() -> int:
             and "state" in h
             and "model" in h
             and "ollama_ready" in h
+            and "cursor_cli_ready" in h
+            and "temp" in h
+            and "web_search" in h
+            and "listen_ms" in h
+            and "stt_engine" in h
             and h.get("version") == expected_ver,
             detail=str(h),
         )
@@ -98,7 +106,10 @@ def main() -> int:
             hello = json.loads(ws.receive_text())
             ok(
                 "WS /ws/device hello",
-                hello.get("type") == "hello" and hello.get("audio_params", {}).get("format") == "pcm",
+                hello.get("type") == "hello"
+                and hello.get("audio_params", {}).get("format") == "pcm"
+                and isinstance(hello.get("listen_ms"), int)
+                and hello["listen_ms"] >= 1000,
             )
             ws.send_text(json.dumps({"type": "hello", "fw": "test"}))
             ws.send_text(
