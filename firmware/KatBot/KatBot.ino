@@ -44,7 +44,6 @@ static char speakLine[22] = "";
 
 static int16_t micBuf[MIC_CHUNK];
 static uint16_t micCount = 0;
-static uint32_t nextMicUs = 0;
 
 static int16_t playRing[PLAY_RING];
 static uint16_t playW = 0;
@@ -235,7 +234,7 @@ static void sendHello() {
       txbuf,
       sizeof(txbuf),
       PSTR("{\"type\":\"hello\",\"version\":1,\"transport\":\"websocket\","
-           "\"audio_params\":{\"format\":\"pcm\",\"sample_rate\":8000,\"channels\":1,\"bits\":16}}"));
+           "\"audio_params\":{\"format\":\"pcm\",\"sample_rate\":16000,\"channels\":1,\"bits\":16}}"));
   sendTxt();
 }
 
@@ -355,6 +354,29 @@ static void pumpPlay() {
   }
 }
 
+// ── INMP441 I2S mic ──────────────────────────────────────────────────────────
+// ESP8266 has one shared I2S bus. Mic and amp use the same BCLK/WS/DATA pins.
+// We init RX-only when listening and TX-only when playing — never simultaneously.
+// i2s_rxtx_begin(rx, tx) is the correct API in esp8266 core 3.x.
+// INMP441 is 24-bit; call i2s_set_bits(24) before begin so the core shifts
+// correctly — i2s_read_sample() then returns values in int16_t range.
+
+static void micI2sBegin() {
+  // Always stop any active I2S (TX or TX+RX) before switching to RX-only.
+  i2s_end();
+  i2sOn = false;
+  playDraining = false;
+  playW = 0;
+  playR = 0;
+  i2s_set_bits(24);
+  i2s_rxtx_begin(true /*rx*/, false /*tx*/);
+  i2s_set_rate(MIC_HZ);
+}
+
+static void micI2sStop() {
+  i2s_end();
+}
+
 static void flushMic() {
   if (micCount > 0 && wsReady) {
     webSocket.sendBIN((uint8_t*)micBuf, micCount * 2);
@@ -364,21 +386,16 @@ static void flushMic() {
 
 static void sampleMic() {
   if (gState != ST_LISTENING) return;
-  uint32_t now = micros();
-  uint8_t n = 0;
-  while ((int32_t)(now - nextMicUs) >= 0 && n < 8) {
-    nextMicUs += 1000000UL / MIC_HZ;
-    int raw = analogRead(A0);
-    int32_t s = (raw - 512) * 64;
-    if (s > 32767) s = 32767;
-    if (s < -32767) s = -32767;
-    micBuf[micCount++] = (int16_t)s;
+  // Drain all available RX samples non-blocking.
+  // i2s_read_sample returns the left channel (INMP441 L/R tied to GND → left).
+  while (i2s_rx_available() > 0) {
+    int16_t left = 0, right = 0;
+    if (!i2s_read_sample(&left, &right, false)) break;
+    micBuf[micCount++] = left;
     if (micCount >= MIC_CHUNK) {
       if (wsReady) webSocket.sendBIN((uint8_t*)micBuf, MIC_CHUNK * 2);
       micCount = 0;
     }
-    n++;
-    now = micros();
   }
 }
 
@@ -387,10 +404,10 @@ static void startListen() {
     return;
   }
   stopI2s();
-  playMeo();
+  playMeo();            // playMeo uses TX I2S; ends before we start RX
   listenStartMs = millis();
   micCount = 0;
-  nextMicUs = micros();
+  micI2sBegin();        // switch I2S bus to RX for INMP441
   gState = ST_LISTENING;
   sendListen("start");
   sendTelemetry();
@@ -399,11 +416,12 @@ static void startListen() {
 
 static void finishListen() {
   flushMic();
+  micI2sStop();         // release I2S RX before switching back to TX
   gState = ST_THINKING;
   sendListen("stop");
   sendTelemetry();
   renderOled();
-  playMeoMeo();
+  playMeoMeo();         // TX I2S re-initialised inside playMeoMeo → ensureI2s
   renderOled();
 }
 
@@ -525,9 +543,10 @@ static void wsEvent(WStype_t type, uint8_t* payload, size_t length) {
 }
 
 void setup() {
+  system_update_cpu_freq(160);  // INMP441 I2S requires 160 MHz for stable capture
   pinMode(PIN_LISTEN_BTN, INPUT_PULLUP);
   btnPrev = digitalRead(PIN_LISTEN_BTN);
-  randomSeed(ESP.getCycleCount() ^ (uint32_t)analogRead(A0));
+  randomSeed(ESP.getCycleCount());
   catUiBegin();
 
   Wire.begin();

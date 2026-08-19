@@ -18,8 +18,9 @@
 #define DHT_PERIOD_MS 8000
 #define LISTEN_MS 5000
 #define BTN_DEBOUNCE_MS 40
-#define MIC_HZ 8000
-#define MIC_CHUNK 160
+#define MIC_HZ 16000
+#define MIC_CHUNK 320        // 20 ms at 16 kHz
+#define MIC_I2S_BITS 32      // INMP441 outputs 24-bit in a 32-bit I2S frame
 #define PLAY_HZ 16000
 // ~128 ms at 16 kHz. 512 samples (~32 ms) underrun → loa rè (EnvChatBot AMP_BUF 4KB).
 #define PLAY_RING 2048

@@ -27,6 +27,7 @@ class Hub:
         self.temp: float | None = None
         self.humidity: float | None = None
         self.listen_ms: int | None = None
+        self.mic_sample_rate: int = 16000  # updated from hello audio_params
         self.audio = bytearray()
         self.listening = False
 

@@ -17,13 +17,13 @@ Handshake: server sends `hello` with `session_id` and `listen_ms`. Device sends 
 | `telemetry` | DHT + `state` (`idle` / `listening` / `thinking` / `speaking`) + `listen_ms` |
 | `abort` | Cancel |
 
-Binary frames while `listening`: 8 kHz, 16-bit, mono PCM.
+Binary frames while `listening`: 16 kHz, 16-bit, mono PCM.
 
 ### Server → device
 
 | `type` | When |
 | --- | --- |
-| `hello` | Session id, `listen_ms`, audio params (uplink 8 kHz PCM) |
+| `hello` | Session id, `listen_ms`, audio params (uplink 16 kHz PCM) |
 | `config` | `{ "listen_ms": 5000 }` |
 | `state` | e.g. `{ "value": "idle" }` |
 | `tts` | `start`, `sentence_start` (caption), `stop` |

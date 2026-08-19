@@ -290,7 +290,7 @@ def _transcribe_elevenlabs(pcm: bytes, sample_rate: int) -> str:
     return (data.get("text") or "").strip()
 
 
-def transcribe(pcm: bytes, sample_rate: int = 8000) -> str:
+def transcribe(pcm: bytes, sample_rate: int = 16000) -> str:
     if len(pcm) < 4000:
         return ""
     if stt_engine_name() == "elevenlabs":

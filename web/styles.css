@@ -283,7 +283,18 @@ progress {
 progress::-webkit-progress-bar { background: rgba(255,255,255,0.6); border-radius: 999px; }
 progress::-webkit-progress-value { background: linear-gradient(90deg, var(--color-lavender), var(--color-primary)); border-radius: 999px; }
 
-form { display: flex; gap: 8px; }
+.chat-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.chat-card .hint { flex: 0 0 auto; }
+#chatForm {
+  display: flex;
+  gap: 8px;
+  flex: 0 0 auto;
+  margin-top: 12px;
+}
 input[type="text"] {
   flex: 1;
   min-height: 44px;
@@ -327,8 +338,11 @@ button:disabled { opacity: 0.5; cursor: default; transform: none; }
 .log li.err { color: var(--color-destructive); }
 .log.chat {
   display: flex;
-  flex-direction: column-reverse;
+  flex-direction: column;
+  flex: 1 1 auto;
   gap: 8px;
+  margin: 0;
+  min-height: 180px;
 }
 .log.chat li {
   border: 0;
@@ -370,6 +384,111 @@ button:disabled { opacity: 0.5; cursor: default; transform: none; }
 }
 .play-clip:hover { background: var(--color-primary); color: #fff; }
 .play-clip.playing { background: var(--color-accent); color: #fff; }
+
+/* ── Firmware card ── */
+.fw-card .hint { margin-bottom: 14px; }
+
+.fw-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+  margin-bottom: 14px;
+}
+.fw-label {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-muted-foreground);
+  margin-bottom: 6px;
+}
+.fw-port-group { display: flex; flex-direction: column; }
+.fw-port-row { display: flex; gap: 6px; }
+.fw-select {
+  min-height: 44px;
+  background: rgba(255,255,255,0.72);
+  border: 1px solid rgba(255,255,255,0.95);
+  color: var(--color-foreground);
+  border-radius: 14px;
+  padding: 8px 12px;
+  font-family: inherit;
+  font-size: 0.92rem;
+  cursor: pointer;
+  min-width: 160px;
+}
+.fw-actions { display: flex; gap: 8px; align-items: flex-end; }
+.btn-fw {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  font-size: 0.9rem;
+}
+.btn-secondary {
+  min-height: 44px;
+  background: rgba(255,255,255,0.55);
+  color: var(--color-foreground);
+  border: 1px solid rgba(255,255,255,0.9);
+  border-radius: 14px;
+  padding: 8px 12px;
+  font-family: inherit;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: background var(--dur) var(--ease), transform var(--dur) var(--ease);
+}
+.btn-secondary:hover { background: rgba(255,255,255,0.8); transform: translateY(-1px); }
+
+.btn-flash {
+  background: linear-gradient(135deg, #7dd3c0 0%, #2f9e8c 100%);
+  color: #052e2b;
+}
+.btn-flash:not(:disabled):hover { filter: brightness(1.06); }
+
+.fw-status-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  background: rgba(255,255,255,0.4);
+  border: 1px solid rgba(255,255,255,0.8);
+  color: var(--color-muted-foreground);
+  align-self: flex-end;
+  min-height: 36px;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.fw-status-chip.ok { background: rgba(125, 211, 192, 0.45); color: #065f46; }
+.fw-status-chip.err { background: rgba(252, 165, 165, 0.45); color: #991b1b; }
+.fw-status-chip.busy { background: rgba(196, 181, 253, 0.45); color: #4c1d95; }
+
+.fw-log {
+  background: rgba(15, 23, 42, 0.82);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 14px;
+  padding: 14px 16px;
+  font-family: "Fira Code", "Consolas", monospace;
+  font-size: 0.8rem;
+  line-height: 1.7;
+  color: #e2e8f0;
+  max-height: 280px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.fw-log:empty::before {
+  content: "Log sẽ hiện ở đây…";
+  color: #475569;
+}
+.fw-log .ok  { color: #86efac; }
+.fw-log .err { color: #fca5a5; }
 
 .sr-only {
   position: absolute;

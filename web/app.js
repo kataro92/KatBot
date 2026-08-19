@@ -81,7 +81,12 @@ function addChat(role, text, audioId, ts) {
     btn.addEventListener("click", () => toggleClip(btn, audioId));
     li.appendChild(btn);
   }
-  chatLog.prepend(li);
+  chatLog.appendChild(li);
+  scrollChatToEnd();
+}
+
+function scrollChatToEnd() {
+  chatLog.scrollTop = chatLog.scrollHeight;
 }
 
 let clipPlayer = null;
@@ -565,6 +570,136 @@ chatForm.addEventListener("submit", async (e) => {
     chatInput.focus();
   }
 });
+
+// ── Firmware panel ──────────────────────────────────────────────────────────
+const fwPort = document.getElementById("fwPort");
+const fwRefreshPorts = document.getElementById("fwRefreshPorts");
+const fwCompile = document.getElementById("fwCompile");
+const fwFlash = document.getElementById("fwFlash");
+const fwLog = document.getElementById("fwLog");
+const fwStatusChip = document.getElementById("fwStatus");
+
+let fwLastCompileOk = false;
+
+function fwSetStatus(text, cls) {
+  fwStatusChip.textContent = text;
+  fwStatusChip.className = "fw-status-chip" + (cls ? " " + cls : "");
+}
+
+function fwAppendLog(line, cls) {
+  const span = document.createElement("span");
+  if (cls) span.className = cls;
+  span.textContent = line + "\n";
+  fwLog.appendChild(span);
+  fwLog.scrollTop = fwLog.scrollHeight;
+}
+
+async function fwLoadPorts() {
+  fwRefreshPorts.disabled = true;
+  try {
+    const r = await fetch("/api/firmware/ports", { cache: "no-store" });
+    const data = await r.json();
+    const ports = data.ports || [];
+    const prev = fwPort.value;
+    while (fwPort.options.length > 1) fwPort.remove(1);
+    for (const p of ports) {
+      const opt = document.createElement("option");
+      opt.value = p.port;
+      opt.textContent = p.board ? `${p.port} — ${p.board}` : p.port;
+      fwPort.appendChild(opt);
+    }
+    if (prev && [...fwPort.options].some((o) => o.value === prev)) {
+      fwPort.value = prev;
+    } else if (ports.length === 1) {
+      fwPort.value = ports[0].port;
+    }
+  } catch (err) {
+    fwAppendLog("Lỗi tìm cổng: " + err, "err");
+  } finally {
+    fwRefreshPorts.disabled = false;
+  }
+}
+
+async function fwStreamAction(url, payload) {
+  fwLog.innerHTML = "";
+  fwCompile.disabled = true;
+  fwFlash.disabled = true;
+
+  try {
+    const r = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload || {}),
+    });
+    if (!r.ok) {
+      const err = await r.text();
+      fwAppendLog("Lỗi: " + err, "err");
+      fwSetStatus("Lỗi", "err");
+      return;
+    }
+    const reader = r.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const parts = buf.split("\n");
+      buf = parts.pop();
+      for (const part of parts) {
+        if (!part.startsWith("data:")) continue;
+        const line = part.slice(5).trim();
+        if (!line || line === "[DONE]") continue;
+        const cls = line.startsWith("✓") ? "ok" : line.startsWith("✗") ? "err" : "";
+        fwAppendLog(line, cls);
+      }
+    }
+  } catch (err) {
+    fwAppendLog("Lỗi kết nối: " + err, "err");
+    fwSetStatus("Lỗi kết nối", "err");
+  } finally {
+    // Re-check status from server
+    try {
+      const s = await fetch("/api/firmware/status", { cache: "no-store" });
+      const st = await s.json();
+      if (st.ok === true) {
+        fwSetStatus(st.message || "Hoàn thành", "ok");
+        if (st.phase === "idle" && st.message.includes("Biên dịch")) {
+          fwLastCompileOk = true;
+          fwFlash.disabled = !fwPort.value;
+        }
+      } else if (st.ok === false) {
+        fwSetStatus(st.message || "Lỗi", "err");
+      } else {
+        fwSetStatus("Sẵn sàng");
+      }
+    } catch (_) {}
+    fwCompile.disabled = false;
+    if (fwLastCompileOk) fwFlash.disabled = !fwPort.value;
+  }
+}
+
+fwRefreshPorts.addEventListener("click", fwLoadPorts);
+
+fwPort.addEventListener("change", () => {
+  if (fwLastCompileOk) fwFlash.disabled = !fwPort.value;
+});
+
+fwCompile.addEventListener("click", async () => {
+  fwSetStatus("Đang biên dịch…", "busy");
+  fwLastCompileOk = false;
+  fwFlash.disabled = true;
+  await fwStreamAction("/api/firmware/compile", {});
+});
+
+fwFlash.addEventListener("click", async () => {
+  const port = fwPort.value;
+  if (!port) { fwAppendLog("Vui lòng chọn cổng COM trước.", "err"); return; }
+  fwSetStatus(`Đang nạp lên ${port}…`, "busy");
+  await fwStreamAction("/api/firmware/flash", { port });
+});
+
+fwLoadPorts();
 
 loadHistory().finally(() => connectMonitor());
 refreshHealth();

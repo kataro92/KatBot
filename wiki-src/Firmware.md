@@ -39,11 +39,23 @@ Copy `firmware/KatBot/secrets.h.example` to `firmware/KatBot/secrets.h` (gitigno
 - Ignored unless the device is `idle` and WebSocket is up
 - OLED status: `nghe` + countdown → `nghi` → `noi` → `idle`
 
-While listening, firmware samples **A0 at 8 kHz** and sends 16-bit PCM binary frames. It does not keep the full 5 s buffer in RAM.
+While listening, firmware captures **INMP441 I2S at 16 kHz** and sends 16-bit PCM binary frames. It does not keep the full 5 s buffer in RAM.
+
+## Mic (INMP441, I2S RX)
+
+- `SCK` → `D8` / GPIO15
+- `WS` → `D4` / GPIO2
+- `SD` → `RX` / GPIO3
+- `L/R` → `GND`
+- CPU frequency should be **160 MHz**
+
+INMP441 is a 24-bit I2S MEMS mic. The ESP8266 core reads it through the built-in low-level I2S RX path and the sketch forwards 16-bit mono PCM to the backend at 16 kHz.
 
 ## Speaker (I2S)
 
 MAX98357: BCLK `D8`, LRC `D4`, DIN **RX / GPIO3** (native ESP8266 I2S data). Playback is 16 kHz 16-bit PCM from the backend. A short boot jingle plays after Wi-Fi.
+
+The INMP441 and MAX98357 share the same I2S pins. Because ESP8266 has only one I2S peripheral, firmware switches the bus between **RX-only** while listening and **TX-only** while speaking.
 
 No `Serial.begin` — RX is the amp data pin. Debug via OLED and the web monitor. USB upload still uses TX/RX in the bootloader before the sketch runs.
 

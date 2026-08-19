@@ -162,7 +162,7 @@ def draw_wiring() -> None:
     d.text((48, 28), "KatBot — sơ đồ cắm dây (NodeMCU v1.0 / ESP-12F)", font=font(34, True), fill=INK)
     d.text(
         (48, 78),
-        "Đúng pin trong firmware/config.h. USB ở cạnh dưới. Đen = GND, cam = 3V3, đỏ = Vin 5V. Luôn theo chữ in trên module nếu thứ tự chân khác.",
+        "Đúng pin trong firmware/config.h. USB ở cạnh dưới. Đen = GND, cam = 3V3, đỏ = Vin 5V. INMP441 và MAX98357 dùng chung bus I2S. Luôn theo chữ in trên module nếu thứ tự chân khác.",
         font=font(18),
         fill=MUTED,
     )
@@ -282,11 +282,11 @@ def draw_wiring() -> None:
     mic = module_box(
         d,
         (80, 160, 820, 380),
-        "MAX9814  (mic analog)",
-        ["OUT", "GND", "VDD", "GAIN", "A/R"],
-        {"OUT": WIRE["mic"], "GND": WIRE["gnd"], "VDD": WIRE["3v3"], "GAIN": (180, 180, 180), "A/R": (180, 180, 180)},
+        "INMP441  (mic I2S đa hướng)",
+        ["L/R", "WS", "SCK", "SD", "VDD", "GND"],
+        {"L/R": (180, 180, 180), "WS": WIRE["i2s"], "SCK": WIRE["i2s"], "SD": WIRE["i2s"], "VDD": WIRE["3v3"], "GND": WIRE["gnd"]},
     )
-    d.text((94, 338), "GAIN và A/R không nối (mặc định). OUT tới A0 (ADC NodeMCU 0–3.3V).", font=font(13), fill=MUTED)
+    d.text((94, 338), "L/R nối GND để lấy kênh trái. Mic dùng chung WS/SCK/SD với MAX98357; firmware đổi I2S giữa RX và TX.", font=font(13), fill=MUTED)
 
     dht = module_box(
         d,
@@ -335,10 +335,13 @@ def draw_wiring() -> None:
     wire(spk["+"], amp_plus, WIRE["spk"], via=[(spk["+"][0], 650), (amp_plus[0], 650)])
     wire(spk["−"], amp_minus, WIRE["spk"], via=[(spk["−"][0], 665), (amp_minus[0], 665)])
 
-    # Mic
-    wire(mic["OUT"], lp["A0"], WIRE["mic"], via=[(900, mic["OUT"][1]), (900, lp["A0"][1])])
+    # INMP441 mic
     wire(mic["GND"], left_gnds[0], WIRE["gnd"], via=[(930, mic["GND"][1]), (930, left_gnds[0][1])])
     wire(mic["VDD"], left_3v3, WIRE["3v3"], via=[(960, mic["VDD"][1]), (960, left_3v3[1])])
+    wire(mic["SD"], rp["RX"], WIRE["i2s"], via=[(940, mic["SD"][1]), (940, 1260), (1752, 1260), (1752, rp["RX"][1])])
+    wire(mic["SCK"], rp["D8"], WIRE["i2s"], via=[(980, mic["SCK"][1]), (980, 1296), (1790, 1296), (1790, rp["D8"][1])])
+    wire(mic["WS"], rp["D4"], WIRE["i2s"], via=[(1020, mic["WS"][1]), (1020, 1234), (1818, 1234), (1818, rp["D4"][1])])
+    wire(mic["L/R"], left_gnds[0], WIRE["gnd"], via=[(900, mic["L/R"][1]), (900, left_gnds[0][1])])
 
     # DHT
     wire(dht["VCC"], left_3v3, WIRE["3v3"], via=[(960, dht["VCC"][1]), (960, left_3v3[1])])
@@ -363,14 +366,17 @@ def draw_wiring() -> None:
         ("DHT11 DATA", "D5 / GPIO14", "trở kéo sẵn trên module"),
         ("DHT11 GND", "GND", ""),
         ("Nút", "D6 / GPIO12  —  GND", "nhấn 1 lần = nghe 5 giây"),
-        ("MAX9814 VDD", "3V3", "GAIN và A/R để trống"),
-        ("MAX9814 GND", "GND", ""),
-        ("MAX9814 OUT", "A0", "ADC NodeMCU"),
+        ("INMP441 VDD", "3V3", "mic I2S 24-bit"),
+        ("INMP441 GND", "GND", ""),
+        ("INMP441 L/R", "GND", "chọn kênh trái"),
+        ("INMP441 SD", "RX / GPIO3", "data I2S, dùng chung với amp"),
+        ("INMP441 SCK", "D8 / GPIO15", "BCLK dùng chung"),
+        ("INMP441 WS", "D4 / GPIO2", "WS / LRCLK dùng chung"),
         ("MAX98357 VIN", "Vin (5V USB)", "công suất loa 3W"),
         ("MAX98357 GND", "GND", "chung mass"),
-        ("MAX98357 DIN", "RX / GPIO3", "I2S phần cứng, không dùng Serial"),
+        ("MAX98357 DIN", "RX / GPIO3", "I2S phần cứng, dùng chung với INMP441"),
         ("MAX98357 BCLK", "D8 / GPIO15", "GPIO15 phải LOW lúc boot"),
-        ("MAX98357 LRC", "D4 / GPIO2", "WS / LRCLK"),
+        ("MAX98357 LRC", "D4 / GPIO2", "WS / LRCLK dùng chung"),
         ("Loa + / −", "MAX98357 + / −", "không nối loa thẳng vào ESP"),
     ]
     col_f = font(15)

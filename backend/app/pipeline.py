@@ -130,8 +130,9 @@ async def on_listen_stop(session: OllamaSession) -> None:
         await hub.send_device({"type": "state", "value": "idle"})
         await hub.set_state("idle")
         return
+    mic_hz = hub.mic_sample_rate
     try:
-        text = await asyncio.to_thread(transcribe, pcm, 8000)
+        text = await asyncio.to_thread(transcribe, pcm, mic_hz)
     except Exception as exc:
         log.exception("STT failed")
         await hub.log("error", f"STT loi: {exc}")
@@ -144,5 +145,5 @@ async def on_listen_stop(session: OllamaSession) -> None:
         await hub.set_state("idle")
         return
     await hub.log("info", f"STT: {text}")
-    audio_id = put_pcm(pcm, 8000)
+    audio_id = put_pcm(pcm, mic_hz)
     await handle_user_text(session, text, audio_id=audio_id)

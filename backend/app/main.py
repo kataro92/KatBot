@@ -3,11 +3,12 @@ from __future__ import annotations
 import json
 import logging
 import asyncio
+import re
 from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.types import Scope
 from pydantic import BaseModel, Field
@@ -21,6 +22,7 @@ from .pipeline import handle_user_text, on_listen_stop
 from .store import close_store, db, init_store, window_bounds
 from . import stt as stt_mod
 from .version import web_asset_version
+from . import firmware as fw_mod
 
 
 class NoCacheStaticFiles(StaticFiles):
@@ -170,6 +172,42 @@ async def clip_wav(clip_id: str) -> Response:
     )
 
 
+@app.get("/api/firmware/ports")
+async def firmware_ports() -> dict:
+    ports = await fw_mod.list_ports()
+    return {"ports": ports}
+
+
+@app.get("/api/firmware/status")
+async def firmware_status() -> dict:
+    return fw_mod.get_status()
+
+
+@app.post("/api/firmware/compile")
+async def firmware_compile() -> StreamingResponse:
+    return StreamingResponse(
+        fw_mod.run_compile(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+    )
+
+
+class FlashIn(BaseModel):
+    port: str = Field(min_length=1, max_length=32)
+
+
+@app.post("/api/firmware/flash")
+async def firmware_flash(body: FlashIn) -> StreamingResponse:
+    port = body.port.strip()
+    if not re.match(r"^(COM\d+|/dev/[\w./-]+)$", port, re.IGNORECASE):
+        raise HTTPException(status_code=400, detail="invalid port")
+    return StreamingResponse(
+        fw_mod.run_flash(port),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+    )
+
+
 @app.post("/api/chat")
 async def chat(body: ChatIn) -> dict[str, str]:
     try:
@@ -225,7 +263,13 @@ async def _handle_device_json(raw: str) -> None:
         return
     kind = msg.get("type")
     if kind == "hello":
-        await hub.log("info", "Device hello")
+        audio_params = msg.get("audio_params") or {}
+        try:
+            sr = int(audio_params.get("sample_rate") or 16000)
+            hub.mic_sample_rate = sr if sr > 0 else 16000
+        except (TypeError, ValueError):
+            hub.mic_sample_rate = 16000
+        await hub.log("info", f"Device hello (mic {hub.mic_sample_rate} Hz)")
         await hub.send_device({"type": "config", "listen_ms": settings.listen_ms})
         await hub.broadcast({"type": "hello", "from": "device", "payload": msg})
     elif kind == "listen":

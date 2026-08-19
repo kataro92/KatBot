@@ -16,7 +16,7 @@ Local voice chatbot (**Mèo Bot**) on ESP-12F / NodeMCU. The chip is a thin clie
 ## How it fits together
 
 1. You press the button on the NodeMCU.
-2. The ESP records **5 seconds** of mic PCM and sends it to the PC over Wi-Fi (WebSocket).
+2. The ESP records **5 seconds** of **16 kHz I2S mic PCM** and sends it to the PC over Wi-Fi (WebSocket).
 3. The PC runs STT, optional tools (weather / FX / search / music), then Cursor CLI or Ollama, then TTS.
 4. PCM comes back to the MAX98357. The web monitor only connects to the PC — it does not load the ESP.
 
@@ -29,4 +29,4 @@ Local voice chatbot (**Mèo Bot**) on ESP-12F / NodeMCU. The chip is a thin clie
 3. Open http://127.0.0.1:8080
 4. Copy `firmware/KatBot/secrets.h.example` → `secrets.h`, set Wi-Fi and the PC LAN IP, flash NodeMCU 1.0.
 
-Current stage: full talk loop is live (listen → STT → tools/LLM → speaker), with a chibi OLED UI and a pastel glass PC monitor (SQLite history, tiếng Việt có dấu).
+Current stage: full talk loop is live (listen → STT → tools/LLM → speaker), with a chibi OLED UI and a pastel glass PC monitor (SQLite history, tiếng Việt có dấu, browser-triggered firmware compile/upload).

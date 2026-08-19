@@ -19,14 +19,14 @@ The browser talks only to the PC. It never loads the ESP.
 | --- | --- | --- |
 | 0–1 | Backend, warm LLM session, web monitor, Wi-Fi, OLED, DHT11, listen button | Done |
 | 2 | TTS playback over I2S (MAX98357, 16 kHz PCM) | Done |
-| 3 | Mic capture (MAX9814 → 8 kHz PCM → STT) | Done |
+| 3 | Mic capture (INMP441 I2S → 16 kHz PCM → STT) | Done |
 | 4 | Full talk loop: listen → STT → tools/LLM → TTS | Done |
 | 5 | Chibi OLED UI, boot SFX, reconnect, tools (weather / FX / search / music) | Done |
 
 ## Features (current)
 
 - Press the button once → firmware opens a **5 second** listen window (not hold-to-talk; `LISTEN_MS` in `.env` and `config.h`)
-- Mic streams 8 kHz PCM to the PC; STT default is **PhoWhisper** (faster-whisper and ElevenLabs Scribe are optional)
+- Mic streams 16 kHz PCM to the PC from an **INMP441** I2S MEMS mic; STT default is **PhoWhisper** (faster-whisper and ElevenLabs Scribe are optional)
 - Chat: **Cursor CLI** (model Auto) first, **Ollama** fallback (`llama3.2` by default)
 - Tools when the utterance needs them: indoor DHT11, outdoor weather, USD/VND, Wikipedia/news/web, short music clips
 - TTS (gTTS, Vietnamese) plays on the MAX98357; music clips use the same I2S path
@@ -43,7 +43,7 @@ Device states: `idle` → `listening` (timer on the chip) → `thinking` → `sp
 | --- | --- |
 | ESP-12F on NodeMCU v1.0 | Wi-Fi MCU |
 | SSD1306 0.96" I2C (e.g. JMD0.96D-1) | Display |
-| MAX9814 | Analog mic (A0) |
+| INMP441 | I2S MEMS mic |
 | MAX98357 + 3 W speaker | I2S amp |
 | DHT11 | Temperature / humidity |
 | Momentary button | Listen trigger, active LOW |
@@ -54,7 +54,16 @@ No Arduino Uno coprocessor.
 
 ![Sơ đồ cắm dây KatBot](docs/wiring.png)
 
-OLED JMD0.96D-1 pin order is commonly **GND–VCC–SCL–SDA**. If VCC/GND are swapped on the silkscreen, follow the PCB labels. Speaker wires go only to the MAX98357 `+` / `−` pads. Share GND. Power the amp from 5 V (`Vin`) for 3 W. Do not sample the ADC while I2S is playing.
+OLED JMD0.96D-1 pin order is commonly **GND–VCC–SCL–SDA**. If VCC/GND are swapped on the silkscreen, follow the PCB labels. Speaker wires go only to the MAX98357 `+` / `−` pads. Share GND. Power the amp from 5 V (`Vin`) for 3 W.
+
+The **INMP441** shares the ESP8266 I2S bus with the MAX98357:
+
+- `SCK` → `D8` / GPIO15
+- `WS` → `D4` / GPIO2
+- `SD` → `RX` / GPIO3
+- `L/R` → `GND` (left channel)
+
+The ESP8266 has a single I2S peripheral, so the firmware switches the bus between **RX** (mic while listening) and **TX** (speaker while talking). There is no full-duplex audio or barge-in.
 
 Battery: feed **regulated 5 V into `Vin`**, not 3.7 V into `3V3`. See [Wiki → Hardware](https://github.com/kataro92/KatBot/wiki/Hardware).
 
@@ -66,10 +75,9 @@ Battery: feed **regulated 5 V into `Vin`**, not 3.7 V into `3V3`. See [Wiki → 
 | OLED SCL | D1 | 5 | Default Wire |
 | DHT11 | D5 | 14 | |
 | Listen button | D6 | 12 | Internal pull-up, press to GND |
-| MAX9814 OUT | A0 | ADC | NodeMCU divider, 0–3.3 V |
-| MAX98357 BCLK | D8 | 15 | Must be LOW at boot |
-| MAX98357 LRC | D4 | 2 | |
-| MAX98357 DIN | RX | 3 | Native I2S data; no Serial debug |
+| INMP441 SCK + MAX98357 BCLK | D8 | 15 | Shared I2S clock, must be LOW at boot |
+| INMP441 WS + MAX98357 LRC | D4 | 2 | Shared I2S word select |
+| INMP441 SD + MAX98357 DIN | RX | 3 | Shared I2S data; no Serial debug |
 
 ## Repository layout
 
@@ -100,7 +108,7 @@ KatBot/
 
 Double-click [`start.bat`](start.bat) in the repo root. It creates `backend/.venv` if needed, installs missing packages, copies `.env` from `.env.example` when absent, then starts the server.
 
-Open [http://127.0.0.1:8080](http://127.0.0.1:8080) (or `http://<pc-lan-ip>:8080`). The monitor is a frosted-glass dashboard served by the backend; the browser never talks to the ESP. Use the text box to confirm chat before flashing. Typed chat uses the same pipeline as the mic, including TTS on the speaker when the ESP is online. After a restart, the chart, chat, and log reload from SQLite.
+Open [http://127.0.0.1:8080](http://127.0.0.1:8080) (or `http://<pc-lan-ip>:8080`). The monitor is a frosted-glass dashboard served by the backend; the browser never talks to the ESP. Use the text box to confirm chat before flashing. Typed chat uses the same pipeline as the mic, including TTS on the speaker when the ESP is online. After a restart, the chart, chat, and log reload from SQLite. The monitor also has a **Firmware** card: list COM ports, compile with `arduino-cli`, and upload from the browser via the local backend.
 
 Ollama must already be running. On startup the backend preloads the model (`keep_alive=-1`) and warms STT.
 
@@ -127,11 +135,11 @@ Do not commit `.env` or API keys. More: [Wiki → Backend](https://github.com/ka
 
 1. Copy [`firmware/KatBot/secrets.h.example`](firmware/KatBot/secrets.h.example) to `firmware/KatBot/secrets.h`.
 2. Set `WIFI_SSID`, `WIFI_PASS`, and `WS_HOST` to this PC’s LAN IPv4. `secrets.h` is gitignored.
-3. Select **NodeMCU 1.0 (ESP-12E)**, the correct COM port, 115200 baud. Or run [`compile.bat`](compile.bat).
+3. Select **NodeMCU 1.0 (ESP-12E)**, the correct COM port, **CPU 160 MHz**, 115200 baud. Or run [`compile.bat`](compile.bat).
 4. Upload [`firmware/KatBot/KatBot.ino`](firmware/KatBot/KatBot.ino).
 5. OLED: Wi-Fi, a short boot jingle, then idle with the cat sprite when the WebSocket is up. The dashboard should show **ESP online**.
 
-Press the listen button once (do not hold). OLED shows `nghe` and a countdown; after 5 s it shows `nghi`, then speaks the reply. Details: [Wiki → Firmware](https://github.com/kataro92/KatBot/wiki/Firmware).
+Press the listen button once (do not hold). OLED shows `nghe` and a countdown; after 5 s it shows `nghi`, then speaks the reply. The mic path is 16 kHz PCM from the INMP441 over I2S. Details: [Wiki → Firmware](https://github.com/kataro92/KatBot/wiki/Firmware).
 
 ## Protocol (device ↔ backend)
 
@@ -140,7 +148,7 @@ WebSocket: `ws://<pc>:8080/ws/device`
 Text JSON (Xiaozhi-like) plus raw PCM binary frames (not Opus):
 
 - Device `hello` / `listen` (`start` \| `stop`) / `telemetry` / `abort`
-- Uplink binary: 8 kHz 16-bit mono PCM while listening
+- Uplink binary: 16 kHz 16-bit mono PCM while listening
 - Server `hello` (includes `session_id`, `listen_ms`) / `config` / `state` / `tts` (`start`, `sentence_start`, `stop`)
 - Downlink binary: 16 kHz 16-bit mono PCM while speaking
 
