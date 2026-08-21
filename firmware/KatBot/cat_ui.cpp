@@ -108,7 +108,8 @@ void catDraw(
   oled.setTextSize(1);
   oled.setTextColor(SSD1306_BLACK, SSD1306_WHITE);
   oled.setCursor(14, 4);
-  oled.print(F("Meo Bot"));
+  oled.print(F("Meo Bot "));
+  oled.print(FW_VERSION);
   drawCaptionBtn(oled, 96, 3, 0);
   drawCaptionBtn(oled, 106, 3, 1);
   drawCaptionBtn(oled, 116, 3, 2);

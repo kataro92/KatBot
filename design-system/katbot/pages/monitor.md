@@ -29,3 +29,12 @@ Style still follows [ui-ux-pro-max](https://github.com/nextlevelbuilder/ui-ux-pr
 ## Chart
 
 Streaming area/line: solid mint for temperature, dashed sky for humidity. Never color-only. Current values also in metric cards.
+
+## Device controls
+
+Keep microphone and speaker selectors together in the device card. The ESP
+volume slider shows its numeric percentage and is disabled or visually muted
+when PC output is selected.
+
+The firmware card uses one selector for the inseparable profile/version pair
+(`mic+loa v0.2.x` or `chỉ mic v0.1.x`), followed by compile and flash actions.

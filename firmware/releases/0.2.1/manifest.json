@@ -1,0 +1,9 @@
+{
+  "version": "0.2.1",
+  "bin": "KatBot.ino.bin",
+  "size": 429344,
+  "ts": 1787335127428,
+  "fqbn": "esp8266:esp8266:nodemcuv2",
+  "profile": "full",
+  "label": "mic+loa"
+}

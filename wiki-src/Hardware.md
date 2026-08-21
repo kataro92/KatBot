@@ -19,30 +19,67 @@ Follow silkscreen on each module if pin order differs (especially OLED VCC/GND).
 
 ## Pin map (NodeMCU labels)
 
-| Function | Pin | GPIO | Notes |
+Mic and amp use **separate** ESP8266 I2S buses: mic = `I2SI_*`, amp = `I2SO_*` (clocks not shared).
+
+### SSD1306 0.96" I2C (`0x3C`)
+
+| Module pin | NodeMCU | GPIO | Notes |
 | --- | --- | --- | --- |
-| OLED SDA | D2 | 4 | I2C data |
-| OLED SCL | D1 | 5 | I2C clock |
-| DHT11 data | D5 | 14 | |
-| Listen button | D6 | 12 | Pull-up, other side to GND |
-| INMP441 SCK + MAX98357 BCLK | D8 | 15 | Shared I2S clock, must be LOW at boot |
-| INMP441 WS + MAX98357 LRC | D4 | 2 | Shared WS / LRCLK |
-| INMP441 SD + MAX98357 DIN | RX | 3 | Shared I2S data (no Serial) |
-| MAX98357 VIN | Vin | 5 V USB or battery boost | For 3 W speaker |
-| INMP441 L/R | GND | | Left channel |
-| OLED / DHT / INMP441 VCC | 3V3 | | |
-| All GND | GND | | Common ground |
+| GND | GND | — | Common ground |
+| VCC | 3V3 | — | 3.3 V |
+| SCL | D1 | 5 | I2C clock |
+| SDA | D2 | 4 | I2C data |
 
-OLED JMD0.96D-1 is commonly **GND–VCC–SCL–SDA**. Speaker `+` / `−` go only to the amp, never to the ESP.
+JMD0.96D-1 is commonly **GND–VCC–SCL–SDA**. Follow silkscreen if VCC/GND are swapped.
 
-INMP441 shares the ESP8266 I2S bus with the MAX98357:
+### INMP441 (I2S mic) — full and mic-only
 
-- `SCK` → `D8` / GPIO15
-- `WS` → `D4` / GPIO2
-- `SD` → `RX` / GPIO3
-- `L/R` → `GND`
+| Module pin | NodeMCU | GPIO | Notes |
+| --- | --- | --- | --- |
+| VDD | 3V3 | — | 3.3 V |
+| GND | GND | — | Common ground |
+| L/R | GND | — | Left channel |
+| SD | **D6** | 12 | `I2SI_DATA` |
+| SCK | **D7** | 13 | `I2SI_BCK` |
+| WS | **D5** | 14 | `I2SI_WS` |
 
-The ESP8266 has one I2S peripheral, so firmware switches it between **RX** (mic during `listening`) and **TX** (speaker during `speaking`). There is no full-duplex audio or barge-in. MAX98357 `GAIN` / `SD` can float (defaults).
+### MAX98357 + speaker — mic+loa (`v0.2.x`) only
+
+| Module pin | NodeMCU | GPIO | Notes |
+| --- | --- | --- | --- |
+| VIN | Vin | — | 5 V USB or battery boost, for 3 W |
+| GND | GND | — | Common ground |
+| DIN | **RX** | 3 | `I2SO_DATA`; no Serial debug |
+| BCLK | **D8** | 15 | `I2SO_BCK` (not shared with mic) |
+| LRC | **D4** | 2 | `I2SO_WS` |
+| GAIN | — | — | Leave floating (default gain) |
+| SD (shutdown) | 3V3 | — | Keep amplifier enabled |
+| Speaker + / − | MAX98357 + / − | — | Never wire the speaker to the ESP |
+
+Mic-only builds: omit the amp and speaker.
+
+### DHT11
+
+| Module pin | NodeMCU | GPIO | Notes |
+| --- | --- | --- | --- |
+| VCC | 3V3 | — | 3.3 V |
+| DATA | **D0** | 16 | Add a **4.7–10 kΩ pull-up resistor** from DATA to 3V3 |
+| GND | GND | — | Common ground |
+
+GPIO16 has no internal pull-up, so firmware reads DHT11 with a dedicated
+GPIO16-compatible routine. A bare 4-pin sensor needs the external resistor;
+some 3-pin modules already include one on the PCB.
+
+### Listen button
+
+| Module pin | NodeMCU | GPIO | Notes |
+| --- | --- | --- | --- |
+| A | **D3** | 0 | `INPUT_PULLUP`, active LOW (do not hold at boot) |
+| B | GND | — | Press connects D3 to GND |
+
+Firmware enables I2S RX while listening and TX while speaking. No full-duplex audio or barge-in.
+
+Speaker `+` / `−` go only to the amp, never to the ESP.
 
 ## Battery
 

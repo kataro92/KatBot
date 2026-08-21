@@ -4,14 +4,18 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from urllib.parse import urlparse
 
 import httpx
 
 from .config import settings
 from .tts import PLAY_HZ, prepare_playback
+from .web_search import _fold
 
 log = logging.getLogger("meobot.music")
 
@@ -32,65 +36,91 @@ class _YtdlpLog:
         log.debug("%s", msg)
 
 
-def looks_music(text: str) -> bool:
-    t = (text or "").lower()
-    keys = (
-        "phát nhạc",
-        "phat nhac",
-        "bật nhạc",
-        "bat nhac",
-        "mở nhạc",
-        "mo nhac",
-        "nghe nhạc",
-        "nghe nhac",
-        "phát bài",
-        "phat bai",
-        "bật bài",
-        "bat bai",
-        "mở bài",
-        "mo bai",
-        "nghe bài",
-        "nghe bai",
-        "play music",
-        "play song",
+_MUSIC_RE = re.compile(
+    r"""
+    (?:
+        (?:hay|hay)\s+(?:phat|hat|nghe)                 # hãy phát / hãy hát / hãy nghe
+        |
+        (?:phat|hat|nghe|bat|mo|play)\s+
+        (?:nhac|bai(?:\s+hat)?|ca\s*khuc|song|music)    # phát nhạc, hát bài, nghe bài hát
+        |
+        (?:hat|phat)\s+bai                              # hát bài / phát bài
+        |
+        play\s+(?:music|song|nhac)
+        |
+        \bkaraoke\b
     )
-    if any(k in t for k in keys):
+    """,
+    re.I | re.X,
+)
+_PHAT_NOT_MUSIC = re.compile(
+    r"\bphat\s*(trien|bieu|hien|hanh|minh|tan|dong|song|thanh|ngon)\b",
+    re.I,
+)
+_MUSIC_VERB = re.compile(r"\b(phat|hat|nghe|bat|mo|play)\b", re.I)
+_MUSIC_NOUN = re.compile(r"\b(nhac|bai|ca\s*khuc|karaoke|song|music)\b", re.I)
+_MUSIC_FILLER = re.compile(
+    r"\b("
+    r"hay noi|hãy nói|cho minh|cho mình|giup minh|giúp mình|"
+    r"con meo oi|con mèo ơi|meo oi|mèo ơi|oi|ơi"
+    r")\b",
+    re.I,
+)
+_MUSIC_STRIP = re.compile(
+    r"\b("
+    r"hay phat nhac|hay hat nhac|hay phat bai hat|hay hat bai hat|"
+    r"hay phat bai|hay hat bai|hay phat|hay hat|hay nghe|"
+    r"phat nhac|phat bai hat|phat bai|hat bai hat|hat bai|"
+    r"nghe nhac|nghe bai hat|nghe bai|"
+    r"bat nhac|bat bai hat|bat bai|"
+    r"mo nhac|mo bai hat|mo bai|"
+    r"play music|play song|play|"
+    r"ca khuc|bai hat|nhac|"
+    r"giup minh|di|nhe|voi|cho em|cho minh"
+    r")\b",
+    re.I,
+)
+
+
+def looks_music(text: str) -> bool:
+    raw = (text or "").strip()
+    if not raw:
+        return False
+    t = _fold(_MUSIC_FILLER.sub(" ", raw))
+    t = re.sub(r"[^\w\s]", " ", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    if t in {"nhac", "hat", "play", "karaoke"}:
         return True
-    return t.startswith("play ") or t.strip() in {"nhạc", "nhac", "play"}
+    if t.startswith("play "):
+        return True
+    has_noun = bool(_MUSIC_NOUN.search(t))
+    if _PHAT_NOT_MUSIC.search(t) and not has_noun:
+        return False
+    if _MUSIC_RE.search(t):
+        return True
+    if _MUSIC_VERB.search(t) and has_noun:
+        return True
+    return False
 
 
 def music_query(text: str) -> str:
-    t = (text or "").strip()
-    for k in (
-        "phát nhạc",
-        "phat nhac",
-        "bật nhạc",
-        "bat nhac",
-        "mở nhạc",
-        "mo nhac",
-        "nghe nhạc",
-        "nghe nhac",
-        "phát bài",
-        "phat bai",
-        "bật bài",
-        "bat bai",
-        "mở bài hát",
-        "mo bai hat",
-        "mở bài",
-        "mo bai",
-        "nghe bài hát",
-        "nghe bai hat",
-        "nghe bài",
-        "nghe bai",
-        "play music",
-        "play song",
-        "play",
-    ):
-        t = t.replace(k, " ")
-    for extra in ("giúp mình", "giup minh", "đi", "di", "nhé", "nhe", "với", "voi"):
-        t = t.replace(extra, " ")
-    t = " ".join(t.split()).strip(" .,!?")
-    return t or "nhạc pop việt nam"
+    t = _MUSIC_FILLER.sub(" ", text or "")
+    folded = _fold(t)
+    folded = re.sub(r"[^\w\s]", " ", folded)
+    prev = None
+    while prev != folded:
+        prev = folded
+        folded = _MUSIC_STRIP.sub(" ", folded)
+        folded = re.sub(r"\s+", " ", folded).strip()
+    # Keep original letters for the leftover tokens (accents) when possible.
+    keep = set(folded.split())
+    if keep:
+        original_tokens = re.findall(r"[^\s.,!?]+", t)
+        leftover = [tok for tok in original_tokens if _fold(tok) in keep]
+        q = " ".join(leftover).strip(" .,!?")
+        if q:
+            return q
+    return folded or "nhạc pop việt nam"
 
 
 def _ffmpeg() -> str:
@@ -226,6 +256,104 @@ def _search_urls(spec: str, n: int) -> list[str]:
     return urls[:n]
 
 
+def _dedupe_urls(urls: list[str], n: int | None = None) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for url in urls:
+        clean = (url or "").strip()
+        key = clean.rstrip("/").lower()
+        if not clean.startswith(("http://", "https://")) or key in seen:
+            continue
+        seen.add(key)
+        out.append(clean)
+        if n is not None and len(out) >= n:
+            break
+    return out
+
+
+def _web_music_urls(query: str, *, site: str | None = None, n: int = 8) -> list[str]:
+    """Use web search for platforms without a yt-dlp search pseudo-URL."""
+    try:
+        from ddgs import DDGS
+    except ImportError:
+        return []
+    search = f"{query} site:{site}" if site else f"{query} nghe nhạc"
+    for backend in ("startpage", "brave", "duckduckgo"):
+        try:
+            with DDGS(timeout=15) as ddgs:
+                items = ddgs.text(
+                    search,
+                    region=settings.web_search_region,
+                    max_results=max(n, 8),
+                    backend=backend,
+                )
+        except Exception as exc:
+            log.info("Music web search %s failed: %s", backend, exc)
+            continue
+        urls = [
+            str(item.get("href") or item.get("url") or "").strip()
+            for item in (items or [])
+            if isinstance(item, dict)
+        ]
+        if site:
+            urls = [url for url in urls if site in urlparse(url).netloc.lower()]
+        found = _dedupe_urls(urls, n)
+        if found:
+            return found
+    return []
+
+
+def _platform(url: str) -> str:
+    host = urlparse(url).netloc.lower()
+    if "youtube.com" in host or "youtu.be" in host:
+        return "youtube"
+    if "zingmp3.vn" in host:
+        return "zingmp3"
+    if "soundcloud.com" in host:
+        return "soundcloud"
+    return "other"
+
+
+def _discover_music_urls(query: str) -> dict[str, list[str]]:
+    """Search every supported source first; selection happens by fixed priority."""
+
+    def youtube() -> list[str]:
+        urls: list[str] = []
+        for spec in (f"ytsearch8:{query}", f"ytsearch5:{query} lyrics"):
+            urls.extend(_search_urls(spec, 8))
+        return _dedupe_urls(urls, 10)
+
+    def zing() -> list[str]:
+        return _web_music_urls(query, site="zingmp3.vn", n=8)
+
+    def soundcloud() -> list[str]:
+        return _dedupe_urls(_search_urls(f"scsearch8:{query}", 8), 8)
+
+    def other() -> list[str]:
+        urls = _web_music_urls(query, n=12)
+        return [url for url in urls if _platform(url) == "other"]
+
+    jobs = {
+        "youtube": youtube,
+        "zingmp3": zing,
+        "soundcloud": soundcloud,
+        "other": other,
+    }
+    found: dict[str, list[str]] = {name: [] for name in jobs}
+    with ThreadPoolExecutor(max_workers=len(jobs), thread_name_prefix="music-search") as pool:
+        futures = {name: pool.submit(fn) for name, fn in jobs.items()}
+        for name, future in futures.items():
+            try:
+                found[name] = future.result()
+            except Exception as exc:
+                log.info("Music search %s failed: %s", name, exc)
+    log.info(
+        "Music candidates: %s",
+        ", ".join(f"{name}={len(found[name])}" for name in jobs),
+    )
+    return found
+
+
 def _download_url(url: str, extra: dict) -> tuple[str, bytes]:
     import yt_dlp
 
@@ -325,26 +453,16 @@ def fetch_track_pcm(query: str) -> tuple[str, bytes]:
     except ImportError as exc:
         raise RuntimeError("Chua cai yt-dlp (pip install yt-dlp)") from exc
 
-    sc_urls = _search_urls(f"scsearch5:{query}", 5)
-    hit = _try_urls(
-        "soundcloud",
-        sc_urls,
-        {"format": "bestaudio/best"},
-    )
-    if hit:
-        return hit
-
-    yt_queries = [f"ytsearch8:{query}", f"ytsearch5:{query} lyrics"]
-    yt_urls: list[str] = []
-    for spec in yt_queries:
-        for url in _search_urls(spec, 8):
-            if url not in yt_urls:
-                yt_urls.append(url)
+    candidates = _discover_music_urls(query)
     runtimes = _js_runtimes()
-    log.info("YouTube via yt-dlp js=%s urls=%s", ",".join(runtimes), len(yt_urls))
+    log.info(
+        "YouTube via yt-dlp js=%s urls=%s",
+        ",".join(runtimes),
+        len(candidates["youtube"]),
+    )
     hit = _try_urls(
         "youtube",
-        yt_urls[:8],
+        candidates["youtube"],
         {
             "format": "bestaudio/best",
             "extractor_args": {
@@ -355,9 +473,35 @@ def fetch_track_pcm(query: str) -> tuple[str, bytes]:
     if hit:
         return hit
 
+    hit = _try_urls(
+        "zingmp3",
+        candidates["zingmp3"],
+        {"format": "bestaudio/best"},
+    )
+    if hit:
+        return hit
+
+    hit = _try_urls(
+        "soundcloud",
+        candidates["soundcloud"],
+        {"format": "bestaudio/best"},
+    )
+    if hit:
+        return hit
+
+    hit = _try_urls(
+        "other",
+        candidates["other"],
+        {"format": "bestaudio/best"},
+    )
+    if hit:
+        return hit
+
     try:
         title, pcm = _archive_fetch(query)
         log.info("Music via archive.org: %s", title)
         return title, pcm
     except Exception as exc:
-        raise RuntimeError(f"Khong tai duoc nhac (SoundCloud/YouTube/Archive). {exc}") from exc
+        raise RuntimeError(
+            f"Khong tai duoc nhac (YouTube/Zing MP3/SoundCloud/other). {exc}"
+        ) from exc

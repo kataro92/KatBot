@@ -1,7 +1,5 @@
 Adafruit SSD1306
 Adafruit GFX Library
-DHT sensor library
-Adafruit Unified Sensor
 ArduinoJson
 WebSockets
 # ESP8266: in WebSockets.h use ifndef + 2KB MAX_DATA_SIZE (Arduino IDE compiles the library .cpp without sketch #defines).

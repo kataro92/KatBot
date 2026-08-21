@@ -58,7 +58,16 @@ def main() -> int:
     with TestClient(app) as client:
         client.timeout = httpx.Timeout(180.0)
         r = client.get("/")
-        ok("GET /", r.status_code == 200 and "Mèo Bot" in r.text and "chartRanges" in r.text)
+        ok(
+            "GET /",
+            r.status_code == 200
+            and "Mèo Bot" in r.text
+            and "chartRanges" in r.text
+            and "micSource" in r.text
+            and "talkBtn" in r.text
+            and "audio-panel" in r.text
+            and "fwVersion" in r.text,
+        )
         ok("GET / Cache-Control", "no-store" in r.headers.get("cache-control", "").lower())
 
         r = client.get("/static/app.js")
@@ -103,6 +112,9 @@ def main() -> int:
             and "temp" in h
             and "web_search" in h
             and "listen_ms" in h
+            and "mic_source" in h
+            and "speaker" in h
+            and "fw_version" in h
             and "stt_engine" in h
             and h.get("version") == expected_ver,
             detail=str(h),
@@ -153,6 +165,66 @@ def main() -> int:
             detail=str(logs)[:240],
         )
 
+        r = client.post("/api/audio-route", json={"mic": "pc", "speaker": "pc"})
+        route = r.json() if r.status_code == 200 else {}
+        ok(
+            "POST /api/audio-route pc",
+            r.status_code == 200 and route.get("mic_source") == "pc" and route.get("speaker") == "pc",
+            detail=str(route),
+        )
+        r = client.post("/api/listen?hz=16000", content=b"\x00\x00" * 200)
+        listen = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+        ok(
+            "POST /api/listen short",
+            r.status_code == 200 and listen.get("ok") == "1",
+            detail=str(listen)[:200],
+        )
+        r = client.post(
+            "/api/audio-route",
+            json={"mic": "esp", "speaker": "esp", "esp_volume": 65},
+        )
+        ok(
+            "POST /api/audio-route esp volume",
+            r.status_code == 200
+            and r.json().get("mic_source") == "esp"
+            and r.json().get("esp_volume") == 65,
+        )
+        r = client.post("/api/audio-route", json={"esp_volume": 101})
+        ok("POST /api/audio-route bad volume", r.status_code == 422)
+
+        r = client.post("/api/listen?hz=16000", content=b"\x00\x00" * 200)
+        ok("POST /api/listen mic not pc", r.status_code == 400)
+
+        r = client.post("/api/listen/start")
+        ok(
+            "POST /api/listen/start esp offline",
+            r.status_code == 400,
+            detail=str(r.json())[:160],
+        )
+
+        r = client.get("/api/firmware/releases")
+        rel = r.json() if r.status_code == 200 else {}
+        ok(
+            "GET /api/firmware/releases",
+            r.status_code == 200
+            and isinstance(rel.get("releases"), list)
+            and "source" in rel
+            and isinstance(rel.get("profiles"), list)
+            and any(p.get("id") == "mic" for p in rel.get("profiles") or []),
+            detail=str(rel)[:280],
+        )
+        r = client.post("/api/firmware/flash", json={"port": "COM9", "version": "not-a-ver"})
+        ok("POST /api/firmware/flash bad version", r.status_code == 400)
+        r = client.post("/api/firmware/flash", json={"port": "COM9", "version": "9.9.9"})
+        body = ""
+        if r.status_code == 200:
+            body = r.text
+        ok(
+            "POST /api/firmware/flash missing release",
+            r.status_code == 200 and "9.9.9" in body,
+            detail=body[:200],
+        )
+
         with client.websocket_connect("/ws/device") as ws:
             hello = json.loads(ws.receive_text())
             ok(
@@ -162,7 +234,15 @@ def main() -> int:
                 and isinstance(hello.get("listen_ms"), int)
                 and hello["listen_ms"] >= 1000,
             )
-            ws.send_text(json.dumps({"type": "hello", "fw": "test"}))
+            ws.send_text(
+                json.dumps(
+                    {
+                        "type": "hello",
+                        "fw_version": "0.0.1",
+                        "audio_params": {"sample_rate": 16000},
+                    }
+                )
+            )
             ws.send_text(
                 json.dumps({"type": "telemetry", "temp": 26.5, "humidity": 55.0, "state": "idle"})
             )
@@ -209,6 +289,37 @@ def main() -> int:
                     tel is not None and tel.get("type") == "telemetry" and tel.get("temp") == 27.0,
                     detail=str(tel),
                 )
+                client.post("/api/audio-route", json={"mic": "pc", "speaker": "esp"})
+                r = client.post("/api/listen/start")
+                start_pc = r.json() if r.status_code == 200 else {}
+                ok(
+                    "POST /api/listen/start pc",
+                    r.status_code == 200 and start_pc.get("source") == "pc",
+                    detail=str(start_pc),
+                )
+                client.post("/api/audio-route", json={"mic": "esp", "speaker": "esp"})
+                r = client.post("/api/listen/start")
+                ok(
+                    "POST /api/listen/start esp online",
+                    r.status_code == 200 and (r.json() or {}).get("source") == "esp",
+                    detail=str(r.json())[:160],
+                )
+                client.post("/api/audio-route", json={"mic": "pc", "speaker": "esp"})
+                dev.send_text(json.dumps({"type": "listen", "state": "start"}))
+                pc_listen = recv_json_until(
+                    mon,
+                    lambda m: m.get("type") == "listen"
+                    and m.get("state") == "start"
+                    and m.get("source") == "pc",
+                    attempts=20,
+                )
+                ok(
+                    "WS ESP button triggers PC listen",
+                    pc_listen is not None and pc_listen.get("source") == "pc",
+                    detail=str(pc_listen),
+                )
+                dev.send_text(json.dumps({"type": "listen", "state": "stop"}))
+                client.post("/api/audio-route", json={"mic": "esp", "speaker": "esp"})
 
         r = client.get("/api/history/telemetry?window=1h")
         pts = (r.json() or {}).get("points") or []

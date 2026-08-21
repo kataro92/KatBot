@@ -28,8 +28,13 @@ class Hub:
         self.humidity: float | None = None
         self.listen_ms: int | None = None
         self.mic_sample_rate: int = 16000  # updated from hello audio_params
+        self.listen_chunks: int = 0
         self.audio = bytearray()
         self.listening = False
+        self.mic_source = "esp"  # esp | pc
+        self.speaker = "esp"  # esp | pc
+        self.esp_volume = 80  # 0..100
+        self.fw_version: str | None = None
 
     def snapshot(self) -> dict[str, Any]:
         return {
@@ -41,6 +46,10 @@ class Hub:
             "session_id": self.session_id,
             "listen_ms": self.listen_ms,
             "listen_duration_ms": settings.listen_ms,
+            "mic_source": self.mic_source,
+            "speaker": self.speaker,
+            "esp_volume": self.esp_volume,
+            "fw_version": self.fw_version,
         }
 
     async def attach_device(self, ws: WebSocket) -> str:
@@ -64,6 +73,7 @@ class Hub:
             self.state = "offline"
             self.listening = False
             self.session_id = None
+            self.fw_version = None
             await self.broadcast(self.snapshot())
             await self.log("warn", "ESP-12F disconnected")
 
@@ -119,8 +129,6 @@ class Hub:
             )
         elif kind == "log":
             level = str(msg.get("level") or "info")
-            if level == "debug":
-                return
             db().insert_log(ts, level, str(msg.get("message") or ""))
         elif kind == "telemetry":
             temp = msg.get("temp")
@@ -153,10 +161,12 @@ class Hub:
         self.audio.clear()
         self.listening = True
         self.listen_ms = settings.listen_ms
+        self.listen_chunks = 0
 
     def add_audio(self, data: bytes) -> None:
         if self.listening:
             self.audio.extend(data)
+            self.listen_chunks += 1
 
     def stop_listen(self) -> bytes:
         self.listening = False
@@ -164,6 +174,29 @@ class Hub:
         data = bytes(self.audio)
         self.audio.clear()
         return data
+
+    async def set_audio_route(
+        self,
+        *,
+        mic: str | None = None,
+        speaker: str | None = None,
+        esp_volume: int | None = None,
+    ) -> dict[str, str | int]:
+        prev = (self.mic_source, self.speaker, self.esp_volume)
+        if mic in ("esp", "pc"):
+            self.mic_source = mic
+        if speaker in ("esp", "pc"):
+            self.speaker = speaker
+        if esp_volume is not None:
+            self.esp_volume = max(0, min(100, int(esp_volume)))
+        route: dict[str, str | int] = {
+            "mic_source": self.mic_source,
+            "speaker": self.speaker,
+            "esp_volume": self.esp_volume,
+        }
+        if prev != (self.mic_source, self.speaker, self.esp_volume):
+            await self.broadcast({"type": "audio_route", **route})
+        return route
 
 
 hub = Hub()

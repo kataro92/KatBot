@@ -134,19 +134,111 @@ h2 {
 .sec-icon { flex: 0 0 auto; opacity: 0.85; }
 .hint { margin: 0 0 12px; color: var(--color-muted-foreground); font-size: 0.9rem; }
 
+.audio-panel {
+  margin: 0 0 14px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: linear-gradient(160deg, rgba(255,255,255,0.72), rgba(196,181,253,0.22));
+  border: 1px solid rgba(255,255,255,0.9);
+}
+.audio-panel-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 14px 18px;
+}
+.audio-route {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 20px;
+  flex: 1 1 280px;
+}
+.audio-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.audio-label {
+  width: 52px;
+  flex: 0 0 auto;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-muted-foreground);
+}
+.volume-row { min-width: 240px; }
+.volume-row .audio-label { width: auto; }
+.volume-row input[type="range"] {
+  width: 130px;
+  accent-color: var(--color-primary);
+  cursor: pointer;
+}
+.volume-row output {
+  min-width: 38px;
+  color: #4c3fd6;
+  font-size: 0.8rem;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+}
+.seg {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.seg button {
+  min-height: 34px;
+  background: rgba(255,255,255,0.55);
+  color: var(--color-muted-foreground);
+  border: 1px solid rgba(255,255,255,0.9);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+}
+.seg button:hover { color: var(--color-foreground); transform: translateY(-1px); }
+.seg button.active {
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  border-color: transparent;
+}
+.btn-talk {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 8px 18px;
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  border-radius: 14px;
+  flex: 0 0 auto;
+}
+.btn-talk.busy { opacity: 0.7; }
+.audio-hint {
+  margin: 10px 0 0;
+  color: var(--color-muted-foreground);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+.audio-panel .listen-bar { margin-top: 12px; }
+
 .device-head {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
   gap: 12px;
   margin-bottom: 12px;
+  flex-wrap: wrap;
 }
-.device-head h2 { margin: 0; }
+.device-head h2 { margin: 0; margin-right: auto; }
 .session-id {
   color: var(--color-muted-foreground);
   font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
 }
+.fw-ver { font-weight: 700; color: #4c3fd6; }
 
 .metrics {
   display: grid;
@@ -326,9 +418,11 @@ button:disabled { opacity: 0.5; cursor: default; transform: none; }
   list-style: none;
   margin: 12px 0 0;
   padding: 0;
-  max-height: 360px;
+  max-height: 480px;
   overflow: auto;
   font-size: 0.88rem;
+  display: flex;
+  flex-direction: column;
 }
 .log li {
   padding: 8px 4px;
@@ -336,6 +430,8 @@ button:disabled { opacity: 0.5; cursor: default; transform: none; }
   color: var(--color-muted-foreground);
 }
 .log li.err { color: var(--color-destructive); }
+.log li.warn { color: #b45309; }
+.log li.debug { color: #64748b; font-size: 0.82rem; }
 .log.chat {
   display: flex;
   flex-direction: column;
@@ -343,6 +439,8 @@ button:disabled { opacity: 0.5; cursor: default; transform: none; }
   gap: 8px;
   margin: 0;
   min-height: 180px;
+  max-height: 480px;
+  overflow: auto;
 }
 .log.chat li {
   border: 0;

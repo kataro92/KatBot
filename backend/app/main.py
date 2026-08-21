@@ -5,9 +5,9 @@ import logging
 import asyncio
 import re
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, Literal
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.types import Scope
@@ -18,7 +18,7 @@ from .hub import hub
 from .ollama_session import OllamaError, OllamaSession
 from .cursor_cli import CursorCliError, probe_cursor_cli
 from .clips import get_pcm, pcm16_to_wav
-from .pipeline import handle_user_text, on_listen_stop
+from .pipeline import handle_user_text, on_listen_stop, process_listen_pcm
 from .store import close_store, db, init_store, window_bounds
 from . import stt as stt_mod
 from .version import web_asset_version
@@ -106,6 +106,12 @@ class ChatIn(BaseModel):
     text: str = Field(min_length=1, max_length=500)
 
 
+class AudioRouteIn(BaseModel):
+    mic: Literal["esp", "pc"] | None = None
+    speaker: Literal["esp", "pc"] | None = None
+    esp_volume: int | None = Field(default=None, ge=0, le=100)
+
+
 @app.get("/api/version")
 async def version() -> dict[str, str]:
     return {"version": web_asset_version()}
@@ -127,6 +133,10 @@ async def health() -> dict[str, Any]:
         "humidity": hub.humidity,
         "web_search": settings.web_search_enabled,
         "listen_ms": settings.listen_ms,
+        "mic_source": hub.mic_source,
+        "speaker": hub.speaker,
+        "esp_volume": hub.esp_volume,
+        "fw_version": hub.fw_version,
         "stt_engine": _stt_engine_label(),
         "stt_model": _stt_model_label(),
         "version": web_asset_version(),
@@ -183,10 +193,24 @@ async def firmware_status() -> dict:
     return fw_mod.get_status()
 
 
+@app.get("/api/firmware/releases")
+async def firmware_releases() -> dict:
+    return {
+        "releases": fw_mod.list_releases(),
+        "source": fw_mod.sketch_fw_version(),
+        "profiles": fw_mod.get_status().get("profiles", []),
+    }
+
+
+class CompileIn(BaseModel):
+    profile: Literal["full", "mic"] | None = None
+
+
 @app.post("/api/firmware/compile")
-async def firmware_compile() -> StreamingResponse:
+async def firmware_compile(body: CompileIn | None = None) -> StreamingResponse:
+    profile = (body.profile if body else None) or "full"
     return StreamingResponse(
-        fw_mod.run_compile(),
+        fw_mod.run_compile(profile),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
     )
@@ -194,6 +218,7 @@ async def firmware_compile() -> StreamingResponse:
 
 class FlashIn(BaseModel):
     port: str = Field(min_length=1, max_length=32)
+    version: str | None = Field(default=None, max_length=32)
 
 
 @app.post("/api/firmware/flash")
@@ -201,8 +226,11 @@ async def firmware_flash(body: FlashIn) -> StreamingResponse:
     port = body.port.strip()
     if not re.match(r"^(COM\d+|/dev/[\w./-]+)$", port, re.IGNORECASE):
         raise HTTPException(status_code=400, detail="invalid port")
+    version = (body.version or "").strip() or None
+    if version and not re.match(r"^\d+\.\d+\.\d+$", version):
+        raise HTTPException(status_code=400, detail="invalid version")
     return StreamingResponse(
-        fw_mod.run_flash(port),
+        fw_mod.run_flash(port, version),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
     )
@@ -215,6 +243,65 @@ async def chat(body: ChatIn) -> dict[str, str]:
     except OllamaError as exc:
         return {"reply": "", "error": str(exc)}
     return {"reply": reply, "error": ""}
+
+
+@app.post("/api/audio-route")
+async def audio_route(body: AudioRouteIn) -> dict[str, str | int]:
+    prev = (hub.mic_source, hub.speaker, hub.esp_volume)
+    route = await hub.set_audio_route(
+        mic=body.mic,
+        speaker=body.speaker,
+        esp_volume=body.esp_volume,
+    )
+    if body.esp_volume is not None and hub.device_online:
+        await hub.send_device(
+            {
+                "type": "config",
+                "listen_ms": settings.listen_ms,
+                "volume": hub.esp_volume,
+            }
+        )
+    if prev != (route["mic_source"], route["speaker"], route["esp_volume"]):
+        await hub.log(
+            "info",
+            f"Âm thanh: mic={route['mic_source']} loa={route['speaker']} "
+            f"volume={route['esp_volume']}%",
+        )
+    return route
+
+
+@app.post("/api/listen")
+async def listen_pc(request: Request, hz: int = 16000) -> dict[str, str]:
+    if hub.mic_source != "pc":
+        raise HTTPException(status_code=400, detail="mic source is not pc")
+    try:
+        hz_i = int(hz)
+    except (TypeError, ValueError):
+        hz_i = 16000
+    if hz_i < 8000 or hz_i > 48000:
+        raise HTTPException(status_code=400, detail="invalid sample rate")
+    body = await request.body()
+    if len(body) > 2_000_000:
+        raise HTTPException(status_code=413, detail="pcm too large")
+    if len(body) % 2:
+        body = body[:-1]
+    chunks = max(1, len(body) // 640) if body else 0
+    await hub.log("info", f"PC mic nhận {len(body)} byte @ {hz_i} Hz")
+    await process_listen_pcm(session, body, hz_i, chunks, source="pc")
+    return {"ok": "1", "error": ""}
+
+
+@app.post("/api/listen/start")
+async def listen_start() -> dict[str, Any]:
+    """Web Nói button: PC mic capture, or remote-start ESP listen."""
+    ms = settings.listen_ms
+    if hub.mic_source == "pc":
+        return {"source": "pc", "ms": ms}
+    if not hub.device_online:
+        raise HTTPException(status_code=400, detail="ESP offline — chọn micro máy tính hoặc bật ESP")
+    await hub.send_device({"type": "listen", "state": "start"})
+    await hub.log("info", f"Web Nói → ESP nghe {ms} ms")
+    return {"source": "esp", "ms": ms}
 
 
 @app.websocket("/ws/device")
@@ -230,7 +317,7 @@ async def ws_device(ws: WebSocket) -> None:
                 "listen_ms": settings.listen_ms,
                 "audio_params": {
                     "format": "pcm",
-                    "sample_rate": 8000,
+                    "sample_rate": 16000,
                     "channels": 1,
                     "bits": 16,
                 },
@@ -243,7 +330,20 @@ async def ws_device(ws: WebSocket) -> None:
             if message.get("type") == "websocket.disconnect":
                 break
             if message.get("bytes") is not None:
-                hub.add_audio(message["bytes"])
+                raw = message["bytes"]
+                if hub.mic_source != "esp":
+                    continue
+                if not hub.listening:
+                    await hub.log("debug", f"WS BIN lúc không listen: {len(raw)} byte (bỏ qua)")
+                    continue
+                if hub.listen_chunks == 0:
+                    await hub.log("info", f"mic khung WS đầu: {len(raw)} byte")
+                hub.add_audio(raw)
+                if hub.listen_chunks % 50 == 0:
+                    await hub.log(
+                        "debug",
+                        f"mic WS #{hub.listen_chunks} tổng {len(hub.audio)} byte",
+                    )
                 continue
             text = message.get("text")
             if not text:
@@ -269,15 +369,68 @@ async def _handle_device_json(raw: str) -> None:
             hub.mic_sample_rate = sr if sr > 0 else 16000
         except (TypeError, ValueError):
             hub.mic_sample_rate = 16000
-        await hub.log("info", f"Device hello (mic {hub.mic_sample_rate} Hz)")
-        await hub.send_device({"type": "config", "listen_ms": settings.listen_ms})
+        fw = str(msg.get("fw_version") or "").strip() or None
+        hub.fw_version = fw
+        ver_note = f" fw {fw}" if fw else ""
+        has_speaker = msg.get("speaker")
+        if has_speaker is False or str(has_speaker).lower() in ("0", "false"):
+            prev = hub.speaker
+            await hub.set_audio_route(speaker="pc")
+            await hub.log(
+                "info",
+                f"Device hello (mic {hub.mic_sample_rate} Hz{ver_note}, không loa → TTS PC)",
+            )
+            if prev != "pc":
+                await hub.broadcast(hub.snapshot())
+        else:
+            # Full firmware (or older builds without the flag): TTS on ESP.
+            prev = hub.speaker
+            if has_speaker is True or str(has_speaker).lower() in ("1", "true"):
+                await hub.set_audio_route(speaker="esp")
+            await hub.log(
+                "info",
+                f"Device hello (mic {hub.mic_sample_rate} Hz{ver_note}"
+                f"{', loa ESP' if hub.speaker == 'esp' else ''})",
+            )
+            if prev != hub.speaker:
+                await hub.broadcast(hub.snapshot())
+        await hub.send_device(
+            {
+                "type": "config",
+                "listen_ms": settings.listen_ms,
+                "volume": hub.esp_volume,
+            }
+        )
+        await hub.broadcast(hub.snapshot())
         await hub.broadcast({"type": "hello", "from": "device", "payload": msg})
     elif kind == "listen":
         state = msg.get("state")
+        if hub.mic_source != "esp":
+            if state == "start":
+                await hub.set_state("listening")
+                await hub.log(
+                    "info",
+                    f"Nút ESP — thu mic máy tính {settings.listen_ms} ms (bỏ PCM INMP441)",
+                )
+                await hub.broadcast(
+                    {
+                        "type": "listen",
+                        "state": "start",
+                        "ms": settings.listen_ms,
+                        "source": "pc",
+                    }
+                )
+            elif state == "stop":
+                await hub.broadcast({"type": "listen", "state": "stop", "source": "pc"})
+            return
         if state == "start":
             hub.start_listen()
             await hub.set_state("listening")
-            await hub.log("info", f"Listen {settings.listen_ms}ms start")
+            expect = int(settings.listen_ms * hub.mic_sample_rate * 2 / 1000)
+            await hub.log(
+                "info",
+                f"Listen {settings.listen_ms} ms start — kỳ vọng ~{expect} byte PCM @ {hub.mic_sample_rate} Hz",
+            )
             await hub.broadcast({"type": "listen", "state": "start", "ms": settings.listen_ms})
         elif state == "stop":
             await hub.broadcast({"type": "listen", "state": "stop"})
@@ -308,6 +461,8 @@ async def _handle_device_json(raw: str) -> None:
         await hub.set_state("idle")
         await hub.send_device({"type": "state", "value": "idle"})
         await hub.log("info", "Device abort")
+    elif kind == "log":
+        await hub.log(str(msg.get("level") or "info"), str(msg.get("message") or ""))
     else:
         await hub.log("debug", f"Device msg {kind}")
 

@@ -1,0 +1,7 @@
+{
+  "version": "0.0.2",
+  "bin": "KatBot.ino.bin",
+  "size": 429408,
+  "ts": 1787327552701,
+  "fqbn": "esp8266:esp8266:nodemcuv2"
+}

@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import httpx
+import numpy as np
 
 ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
@@ -129,6 +130,14 @@ def main() -> int:
             (posted.get("headers") or {}).get("xi-api-key") == "test-key",
             "eleven post key header",
         )
+
+        quiet = (np.array([80, -60, 40, -90] * 20, dtype=np.int16)).tobytes()
+        boosted, gain, peak_in, peak_out = stt_mod.prepare_stt_pcm(quiet)
+        fail += _check(gain > 2.0 and peak_out > peak_in, "prepare_stt_pcm boosts quiet")
+        fail += _check(len(boosted) == len(quiet), "prepare_stt_pcm length")
+        silent = b"\x00\x00" * 16
+        _, g0, p0, _ = stt_mod.prepare_stt_pcm(silent)
+        fail += _check(g0 == 1.0 and p0 == 0, "prepare_stt_pcm silence")
     finally:
         settings.stt_engine = prev_engine
         settings.whisper_model = prev_model

@@ -46,12 +46,15 @@ Ollama should already be running. Cursor CLI is optional; if it is missing, chat
 
 `listen stop` (or `/api/chat`) runs one lock-protected turn:
 
-1. **STT** (mic path only) — 16 kHz PCM → text
+1. **STT** (mic path only) — DC removal and quiet-mic normalization, then 16 kHz PCM → text
 2. **Tools** — music, time, indoor DHT11, outdoor weather (Open-Meteo), USD/VND, then Wikipedia / news / web
 3. **LLM** — Cursor CLI if enabled, else Ollama. Search hits are composed into a short spoken answer (no URLs, no emoji)
-4. **TTS** — gTTS → 16 kHz PCM chunks over the device WebSocket
+4. **TTS** — gTTS → 16 kHz PCM sent to the selected ESP or PC speaker
 
 Indoor “how warm is it here” uses the DHT11 reading injected into the system prompt. Outdoor “Hà Nội hôm nay” uses Open-Meteo, not the sensor.
+
+Music discovery searches all source groups concurrently, then attempts playback
+in fixed order: **YouTube → Zing MP3 → SoundCloud → other → Archive.org**.
 
 ## Endpoints
 
@@ -65,18 +68,23 @@ Indoor “how warm is it here” uses the DHT11 reading injected into the system
 | `/api/history/chat` | Persisted chat |
 | `/api/history/logs` | Persisted event log |
 | `/api/clips/{id}` | WAV playback of a spoken user clip |
+| `/api/audio-route` | Select ESP/PC microphone and speaker; set ESP volume |
+| `/api/listen/start` | Start the selected microphone path |
 | `/api/firmware/ports` | List COM ports from `arduino-cli` |
+| `/api/firmware/releases` | Profiles and archived firmware versions |
 | `/api/firmware/status` | Current compile / flash state |
-| `/api/firmware/compile` | Stream compile log (SSE) |
-| `/api/firmware/flash` | Stream upload log (SSE) |
+| `/api/firmware/compile` | Compile a selected profile and archive it (SSE) |
+| `/api/firmware/flash` | Flash a selected archived release (SSE) |
 | `/ws/device` | ESP-12F (JSON + PCM) |
 | `/ws/monitor` | Browsers (fan-out only) |
 
 ## Monitor
 
-Pastel glass dashboard (`web/`): frost cards, blush/mint/lavender wash, **Be Vietnam Pro** headings and **Inter** body (both have a Vietnamese subset). It shows ESP online/offline, a DHT chart (1 phút / 15 phút / 1–12 tiếng / 1 ngày / tùy chọn; temperature solid, humidity dashed), the listen countdown, chat bubbles, and the event log. Spoken user lines get a play button (`/api/clips`). Chat, logs, and telemetry are stored in SQLite (`DB_PATH`) and reloaded after refresh. The browser never opens a socket to the chip.
+Pastel glass dashboard (`web/`): frost cards, blush/mint/lavender wash, **Be Vietnam Pro** headings and **Inter** body. It shows ESP status, audio source selectors, ESP volume, a DHT chart, listen countdown, chat, and event logs. Spoken user lines get a play button (`/api/clips`). Chat, logs, and telemetry persist in SQLite. The browser never opens a socket directly to the chip.
 
-There is also a **Firmware** card in the monitor: detect COM ports, compile with `arduino-cli`, and upload from the browser through the local FastAPI backend. Compile / flash logs stream back as SSE.
+The **Firmware** card combines profile and version in one selector, detects COM
+ports, compiles mic+speaker or mic-only builds, archives binaries by version,
+and flashes a selected release. Compile/flash logs stream back as SSE.
 
 ## Tests
 

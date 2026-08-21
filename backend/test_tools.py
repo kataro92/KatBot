@@ -26,8 +26,18 @@ def main() -> int:
     fail = 0
     fail += _check(looks_music("phát nhạc sơn tùng"), "music intent")
     fail += _check(music_query("phát nhạc sơn tùng") == "sơn tùng", "music query")
-    fail += _check(looks_time("bây giờ mấy giờ"), "time intent")
+    fail += _check(looks_music("hãy phát"), "hay phat")
+    fail += _check(looks_music("hãy hát"), "hay hat")
+    fail += _check(looks_music("phát bài hát"), "phat bai hat")
+    fail += _check(looks_music("hát bài"), "hat bai")
+    fail += _check(looks_music("hát bài sơn tùng"), "hat bai artist")
+    fail += _check(looks_music("hay phat bai hat con mua"), "folded hay phat")
+    fail += _check(looks_music("mở nhạc"), "mo nhac")
+    fail += _check("cơn mưa" in music_query("hãy phát bài hát cơn mưa"), "query hay phat title")
+    fail += _check("sơn tùng" in music_query("hát bài sơn tùng"), "query hat bai artist")
+    fail += _check(not looks_music("phát triển kinh tế"), "phat trien not music")
     fail += _check(not looks_music("thời tiết hôm nay"), "weather not music")
+    fail += _check(looks_time("bây giờ mấy giờ"), "time intent")
     fail += _check(
         spoken_from_context("- Thời tiết Hà Nội lúc x: 27°C (https://x)") == "Thời tiết Hà Nội lúc x: 27°C",
         "spoken strip url",

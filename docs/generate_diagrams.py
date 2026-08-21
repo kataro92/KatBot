@@ -156,24 +156,26 @@ def module_box(draw, xy, title, pins, pin_colors):
 
 
 def draw_wiring() -> None:
-    w, h = 2800, 1880
+    w, h = 2800, 2140
     im = Image.new("RGB", (w, h), BG)
     d = ImageDraw.Draw(im)
     d.text((48, 28), "KatBot — sơ đồ cắm dây (NodeMCU v1.0 / ESP-12F)", font=font(34, True), fill=INK)
     d.text(
         (48, 78),
-        "Đúng pin trong firmware/config.h. USB ở cạnh dưới. Đen = GND, cam = 3V3, đỏ = Vin 5V. INMP441 và MAX98357 dùng chung bus I2S. Luôn theo chữ in trên module nếu thứ tự chân khác.",
+        "Đúng pin trong firmware/config.h. Mic dùng I2SI: SD=D6, SCK=D7, WS=D5. Loa dùng I2SO: DIN=RX, BCLK=D8, LRC=D4. DHT=D0; nút=D3.",
         font=font(18),
         fill=MUTED,
     )
 
     used_colors = {
-        "A0": WIRE["mic"],
+        "D0": WIRE["dht"],
         "D1": WIRE["scl"],
         "D2": WIRE["sda"],
+        "D3": WIRE["btn"],
         "D4": WIRE["i2s"],
-        "D5": WIRE["dht"],
-        "D6": WIRE["btn"],
+        "D5": WIRE["i2s"],
+        "D6": WIRE["i2s"],
+        "D7": WIRE["i2s"],
         "RX": WIRE["i2s"],
         "D8": WIRE["i2s"],
         "3V3": WIRE["3v3"],
@@ -266,10 +268,10 @@ def draw_wiring() -> None:
         d,
         (1960, 420, 2680, 640),
         "MAX98357  (I2S amp)  +  loa 3W",
-        ["VIN", "GND", "DIN", "BCLK", "LRC"],
-        {"VIN": WIRE["5v"], "GND": WIRE["gnd"], "DIN": WIRE["i2s"], "BCLK": WIRE["i2s"], "LRC": WIRE["i2s"]},
+        ["VIN", "GND", "SD", "DIN", "BCLK", "LRC"],
+        {"VIN": WIRE["5v"], "GND": WIRE["gnd"], "SD": WIRE["3v3"], "DIN": WIRE["i2s"], "BCLK": WIRE["i2s"], "LRC": WIRE["i2s"]},
     )
-    d.text((1974, 598), "GAIN / SD để treo (mặc định). Loa chỉ cắm vào + − trên amp, không cắm vào ESP.", font=font(13), fill=MUTED)
+    d.text((1974, 598), "SD → 3V3 để amp luôn bật; GAIN để treo. Loa chỉ cắm vào + − trên amp.", font=font(13), fill=MUTED)
 
     spk = module_box(
         d,
@@ -286,12 +288,12 @@ def draw_wiring() -> None:
         ["L/R", "WS", "SCK", "SD", "VDD", "GND"],
         {"L/R": (180, 180, 180), "WS": WIRE["i2s"], "SCK": WIRE["i2s"], "SD": WIRE["i2s"], "VDD": WIRE["3v3"], "GND": WIRE["gnd"]},
     )
-    d.text((94, 338), "L/R nối GND để lấy kênh trái. Mic dùng chung WS/SCK/SD với MAX98357; firmware đổi I2S giữa RX và TX.", font=font(13), fill=MUTED)
+    d.text((94, 338), "L/R → GND. Mic có bus RX riêng: SD=D6, SCK=D7, WS=D5; không dùng chung clock với amp.", font=font(13), fill=MUTED)
 
     dht = module_box(
         d,
         (80, 440, 820, 640),
-        "DHT11  (module 3 chân, thường có trở kéo sẵn)",
+        "DHT11  (D0 cần pull-up DATA → 3V3)",
         ["VCC", "DATA", "GND"],
         {"VCC": WIRE["3v3"], "DATA": WIRE["dht"], "GND": WIRE["gnd"]},
     )
@@ -300,10 +302,10 @@ def draw_wiring() -> None:
         d,
         (80, 700, 820, 900),
         "Nút nhấn  (active LOW, INPUT_PULLUP trong firmware)",
-        ["D6", "GND"],
-        {"D6": WIRE["btn"], "GND": WIRE["gnd"]},
+        ["D3", "GND"],
+        {"D3": WIRE["btn"], "GND": WIRE["gnd"]},
     )
-    d.text((94, 858), "Nút 4 chân: dùng 2 chân chéo. Nhấn nối D6 xuống GND. Không cần điện trở ngoài.", font=font(13), fill=MUTED)
+    d.text((94, 858), "Nút 4 chân: dùng 2 chân chéo. Nhấn nối D3 xuống GND; không giữ nút lúc khởi động.", font=font(13), fill=MUTED)
 
     def wire(a, b, color, width=4, via=None):
         pts = [a]
@@ -323,6 +325,7 @@ def draw_wiring() -> None:
     # Amp
     wire(amp["VIN"], vin, WIRE["5v"], via=[(1900, amp["VIN"][1]), (1900, 1240), (1088, 1240)])
     wire(amp["GND"], right_gnds[0], WIRE["gnd"], via=[(1860, amp["GND"][1]), (1860, right_gnds[0][1])])
+    wire(amp["SD"], right_3v3_top, WIRE["3v3"], via=[(1872, amp["SD"][1]), (1872, right_3v3_top[1])])
     wire(amp["DIN"], rp["RX"], WIRE["i2s"], via=[(1844, amp["DIN"][1]), (1844, rp["RX"][1])])
     wire(amp["BCLK"], rp["D8"], WIRE["i2s"], via=[(1820, amp["BCLK"][1]), (1820, rp["D8"][1])])
     wire(amp["LRC"], rp["D4"], WIRE["i2s"], via=[(1796, amp["LRC"][1]), (1796, rp["D4"][1])])
@@ -338,60 +341,73 @@ def draw_wiring() -> None:
     # INMP441 mic
     wire(mic["GND"], left_gnds[0], WIRE["gnd"], via=[(930, mic["GND"][1]), (930, left_gnds[0][1])])
     wire(mic["VDD"], left_3v3, WIRE["3v3"], via=[(960, mic["VDD"][1]), (960, left_3v3[1])])
-    wire(mic["SD"], rp["RX"], WIRE["i2s"], via=[(940, mic["SD"][1]), (940, 1260), (1752, 1260), (1752, rp["RX"][1])])
-    wire(mic["SCK"], rp["D8"], WIRE["i2s"], via=[(980, mic["SCK"][1]), (980, 1296), (1790, 1296), (1790, rp["D8"][1])])
-    wire(mic["WS"], rp["D4"], WIRE["i2s"], via=[(1020, mic["WS"][1]), (1020, 1234), (1818, 1234), (1818, rp["D4"][1])])
+    wire(mic["SD"], rp["D6"], WIRE["i2s"], via=[(940, mic["SD"][1]), (940, 1260), (1748, 1260), (1748, rp["D6"][1])])
+    wire(mic["SCK"], rp["D7"], WIRE["i2s"], via=[(980, mic["SCK"][1]), (980, 1296), (1790, 1296), (1790, rp["D7"][1])])
+    wire(mic["WS"], rp["D5"], WIRE["i2s"], via=[(1020, mic["WS"][1]), (1020, 1234), (1818, 1234), (1818, rp["D5"][1])])
     wire(mic["L/R"], left_gnds[0], WIRE["gnd"], via=[(900, mic["L/R"][1]), (900, left_gnds[0][1])])
 
     # DHT
     wire(dht["VCC"], left_3v3, WIRE["3v3"], via=[(960, dht["VCC"][1]), (960, left_3v3[1])])
-    wire(dht["DATA"], rp["D5"], WIRE["dht"], via=[(980, dht["DATA"][1]), (980, 1288), (1788, 1288), (1788, rp["D5"][1])])
+    wire(dht["DATA"], rp["D0"], WIRE["dht"], via=[(980, dht["DATA"][1]), (980, 1288), (1788, 1288), (1788, rp["D0"][1])])
     wire(dht["GND"], left_gnds[0], WIRE["gnd"], via=[(930, dht["GND"][1]), (930, left_gnds[0][1])])
 
-    # Button — D6 is on the right header
-    wire(btn["D6"], rp["D6"], WIRE["btn"], via=[(1000, btn["D6"][1]), (1000, 1320), (1766, 1320), (1766, rp["D6"][1])])
+    # Button
+    wire(btn["D3"], rp["D3"], WIRE["btn"], via=[(1000, btn["D3"][1]), (1000, 1320), (1766, 1320), (1766, rp["D3"][1])])
     wire(btn["GND"], left_gnds[1] if len(left_gnds) > 1 else left_gnds[0], WIRE["gnd"], via=[(910, btn["GND"][1]), (910, (left_gnds[1] if len(left_gnds) > 1 else left_gnds[0])[1])])
 
     # Table
     table_y = 1380
-    rounded(d, (80, table_y, 2720, 1840), 16, (255, 255, 255), LINE, 2)
-    d.text((100, table_y + 16), "Bảng nối chân (nguồn sự thật — ưu tiên bảng này nếu dây giao nhau)", font=font(22, True), fill=INK)
+    rounded(d, (80, table_y, 2720, 2090), 16, (255, 255, 255), LINE, 2)
+    d.text((100, table_y + 16), "Bảng nối chân — gom theo module (ưu tiên bảng này nếu dây giao nhau)", font=font(22, True), fill=INK)
 
     rows = [
-        ("SSD1306 GND", "GND", "chung mass"),
-        ("SSD1306 VCC", "3V3", "3.3V"),
-        ("SSD1306 SCL", "D1 / GPIO5", "I2C clock"),
-        ("SSD1306 SDA", "D2 / GPIO4", "I2C data"),
-        ("DHT11 VCC", "3V3", "module 3 chân"),
-        ("DHT11 DATA", "D5 / GPIO14", "trở kéo sẵn trên module"),
-        ("DHT11 GND", "GND", ""),
-        ("Nút", "D6 / GPIO12  —  GND", "nhấn 1 lần = nghe 5 giây"),
-        ("INMP441 VDD", "3V3", "mic I2S 24-bit"),
-        ("INMP441 GND", "GND", ""),
-        ("INMP441 L/R", "GND", "chọn kênh trái"),
-        ("INMP441 SD", "RX / GPIO3", "data I2S, dùng chung với amp"),
-        ("INMP441 SCK", "D8 / GPIO15", "BCLK dùng chung"),
-        ("INMP441 WS", "D4 / GPIO2", "WS / LRCLK dùng chung"),
-        ("MAX98357 VIN", "Vin (5V USB)", "công suất loa 3W"),
-        ("MAX98357 GND", "GND", "chung mass"),
-        ("MAX98357 DIN", "RX / GPIO3", "I2S phần cứng, dùng chung với INMP441"),
-        ("MAX98357 BCLK", "D8 / GPIO15", "GPIO15 phải LOW lúc boot"),
-        ("MAX98357 LRC", "D4 / GPIO2", "WS / LRCLK dùng chung"),
-        ("Loa + / −", "MAX98357 + / −", "không nối loa thẳng vào ESP"),
+        ("SSD1306", True),
+        ("GND", "GND", "chung mass"),
+        ("VCC", "3V3", "3.3V"),
+        ("SCL", "D1 / GPIO5", "I2C clock"),
+        ("SDA", "D2 / GPIO4", "I2C data"),
+        ("INMP441", True),
+        ("VDD", "3V3", "3.3V"),
+        ("GND", "GND", "chung mass"),
+        ("L/R", "GND", "kênh trái"),
+        ("WS", "D5 / GPIO14", "I2SI_WS"),
+        ("SCK", "D7 / GPIO13", "I2SI_BCK"),
+        ("SD", "D6 / GPIO12", "I2S RX — không dùng RX/GPIO3"),
+        ("MAX98357 + loa", True),
+        ("VIN", "Vin (5V)", "công suất loa 3W"),
+        ("GND", "GND", "chung mass"),
+        ("SD shutdown", "3V3", "giữ amp luôn bật"),
+        ("DIN", "RX / GPIO3", "I2S TX only"),
+        ("BCLK", "D8 / GPIO15", "I2SO_BCK; GPIO15 LOW lúc boot"),
+        ("LRC", "D4 / GPIO2", "I2SO_WS"),
+        ("GAIN", "(treo)", "gain mặc định"),
+        ("Loa + / −", "MAX98357 + / −", "không nối loa vào ESP"),
+        ("DHT11", True),
+        ("VCC", "3V3", "3.3V"),
+        ("DATA", "D0 / GPIO16", "pull-up 4.7–10 kΩ lên 3V3"),
+        ("GND", "GND", "chung mass"),
+        ("Nút nghe", True),
+        ("A", "D3 / GPIO0", "INPUT_PULLUP; không giữ lúc boot"),
+        ("B", "GND", "nhấn nối D3 xuống GND"),
     ]
     col_f = font(15)
-    y = table_y + 60
-    d.text((110, y), "Module", font=font(15, True), fill=MUTED)
+    y = table_y + 56
+    d.text((110, y), "Chân module", font=font(15, True), fill=MUTED)
     d.text((620, y), "NodeMCU", font=font(15, True), fill=MUTED)
     d.text((1180, y), "Ghi chú", font=font(15, True), fill=MUTED)
     y += 8
     d.line((100, y + 20, 2700, y + 20), fill=(220, 224, 230), width=1)
-    y += 28
-    for a, b, c in rows:
+    y += 26
+    for row in rows:
+        if len(row) == 2 and row[1] is True:
+            d.text((110, y), row[0], font=font(15, True), fill=ESP)
+            y += 22
+            continue
+        a, b, c = row
         d.text((110, y), a, font=col_f, fill=INK)
         d.text((620, y), b, font=col_f, fill=ESP)
         d.text((1180, y), c, font=col_f, fill=MUTED)
-        y += 22
+        y += 20
 
     im.save(OUT / "wiring.png", "PNG", optimize=True)
 

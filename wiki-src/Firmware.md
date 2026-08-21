@@ -11,12 +11,22 @@ See `firmware/libraries.txt`:
 
 - Adafruit SSD1306
 - Adafruit GFX Library
-- DHT sensor library
-- Adafruit Unified Sensor
 - ArduinoJson
 - WebSockets (Markus Sattler / Links2004) — use a **2 KB** `MAX_DATA_SIZE` in `WebSockets.h` so PCM chunks fit
 
 I2S uses the ESP8266 core `I2S.h` (no extra library).
+DHT11 uses a project-local GPIO16-compatible reader because D0 has no internal pull-up.
+
+## Build profiles and releases
+
+The monitor's single firmware selector keeps profile and version together:
+
+- **mic+loa `v0.2.x`** — INMP441 + MAX98357
+- **chỉ mic `v0.1.x`** — speaker code is compiled out
+
+Compile writes ESP8266 build flags through `KatBot.ino.globals.h`, performs a
+clean build, and archives the binary and manifest under
+`firmware/releases/<version>/`. The OLED title shows the compiled version.
 
 ## Secrets
 
@@ -33,7 +43,7 @@ Copy `firmware/KatBot/secrets.h.example` to `firmware/KatBot/secrets.h` (gitigno
 
 ## Listen button
 
-- Pin `D6` / GPIO12, `INPUT_PULLUP`, press to GND
+- Pin `D3` / GPIO0, `INPUT_PULLUP`, press to GND (do not hold at boot)
 - **One press** starts a listen window (`LISTEN_MS` in `config.h`, overridable by backend `listen_ms`)
 - Not hold-to-talk
 - Ignored unless the device is `idle` and WebSocket is up
@@ -43,21 +53,29 @@ While listening, firmware captures **INMP441 I2S at 16 kHz** and sends 16-bit PC
 
 ## Mic (INMP441, I2S RX)
 
-- `SCK` → `D8` / GPIO15
-- `WS` → `D4` / GPIO2
-- `SD` → `RX` / GPIO3
+- `SCK` → `D7` / GPIO13 (`I2SI_BCK`)
+- `WS` → `D5` / GPIO14 (`I2SI_WS`)
+- `SD` → `D6` / GPIO12 (`I2SI_DATA` — **not** RX/GPIO3)
 - `L/R` → `GND`
 - CPU frequency should be **160 MHz**
 
-INMP441 is a 24-bit I2S MEMS mic. The ESP8266 core reads it through the built-in low-level I2S RX path and the sketch forwards 16-bit mono PCM to the backend at 16 kHz.
+Listen uses **RX-only** with native I2SI clocks. Speak (full build) uses separate I2SO pins for the amp — clocks are never shared with the mic.
 
 ## Speaker (I2S)
 
-MAX98357: BCLK `D8`, LRC `D4`, DIN **RX / GPIO3** (native ESP8266 I2S data). Playback is 16 kHz 16-bit PCM from the backend. A short boot jingle plays after Wi-Fi.
+MAX98357 (mic+loa `v0.2.x`): BCLK `D8`, LRC `D4`, DIN **RX / GPIO3** (`I2SO_*`). Playback is 16 kHz 16-bit PCM from the backend. A short boot jingle plays after Wi-Fi.
 
-The INMP441 and MAX98357 share the same I2S pins. Because ESP8266 has only one I2S peripheral, firmware switches the bus between **RX-only** while listening and **TX-only** while speaking.
+Connect MAX98357 `SD` to 3V3 to keep the amp enabled; leave `GAIN` floating for
+default gain. Playback volume is controlled by the monitor (0–100%, default
+80%). No `Serial.begin` — RX is the amp data pin on full builds. Debug uses
+OLED and the web monitor.
 
-No `Serial.begin` — RX is the amp data pin. Debug via OLED and the web monitor. USB upload still uses TX/RX in the bootloader before the sketch runs.
+## DHT11 on D0
+
+`DATA` connects to D0/GPIO16 and needs a **4.7–10 kΩ pull-up to 3V3**. GPIO16
+does not implement `INPUT_PULLUP`, so the sketch drives the DHT11 transaction
+with `INPUT` mode and verifies its checksum. The first read failure and recovery
+are reported in the monitor log.
 
 ## OLED
 

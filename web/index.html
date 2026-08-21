@@ -48,6 +48,7 @@
             Thiết bị
           </h2>
           <span id="session" class="session-id">phiên —</span>
+          <span id="fwVersionPill" class="session-id fw-ver">fw —</span>
         </div>
         <div class="metrics">
           <div class="metric">
@@ -63,6 +64,44 @@
             <span id="humidity" class="metric-value">—</span>
           </div>
         </div>
+
+        <div class="audio-panel">
+          <div class="audio-panel-main">
+            <div class="audio-route">
+              <div class="audio-row">
+                <span class="audio-label">Micro</span>
+                <div class="seg" id="micSource" role="group" aria-label="Nguồn micro">
+                  <button type="button" data-mic="esp" class="active">ESP</button>
+                  <button type="button" data-mic="pc">Máy tính</button>
+                </div>
+              </div>
+              <div class="audio-row">
+                <span class="audio-label">Loa</span>
+                <div class="seg" id="speakerDest" role="group" aria-label="Loa phát">
+                  <button type="button" data-speaker="esp" class="active">ESP</button>
+                  <button type="button" data-speaker="pc">Máy tính</button>
+                </div>
+              </div>
+              <div class="audio-row volume-row">
+                <label class="audio-label" for="espVolume">Âm lượng ESP</label>
+                <input id="espVolume" type="range" min="0" max="100" step="5" value="80" />
+                <output id="espVolumeValue" for="espVolume">80%</output>
+              </div>
+            </div>
+            <button type="button" id="talkBtn" class="btn-talk" title="Bắt đầu nghe theo micro đang chọn">
+              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                <path fill="currentColor" d="M12 14a3 3 0 003-3V5a3 3 0 10-6 0v6a3 3 0 003 3zm5-3a5 5 0 01-10 0H5a7 7 0 0014 0h-2zm-5 8a1 1 0 01-1-1v-2h2v2a1 1 0 01-1 1z"/>
+              </svg>
+              Nói
+            </button>
+          </div>
+          <p class="audio-hint">Nói trên web hoặc nút ESP đều dùng nguồn Micro đang chọn. Trang monitor cần mở khi micro = máy tính.</p>
+          <div id="listenBar" class="listen-bar hidden">
+            <span>Đang nghe</span>
+            <progress id="listenProgress" max="5000" value="5000"></progress>
+          </div>
+        </div>
+
         <div class="chart-toolbar">
           <div class="chart-ranges" id="chartRanges" role="tablist" aria-label="Khung thời gian biểu đồ">
             <button type="button" data-window="1m">1 phút</button>
@@ -87,10 +126,6 @@
             <span id="chartWindowLabel" class="chart-window">15 phút</span>
           </div>
         </div>
-        <div id="listenBar" class="listen-bar hidden">
-          <span>Đang nghe</span>
-          <progress id="listenProgress" max="5000" value="5000"></progress>
-        </div>
       </section>
 
       <section class="glass card chat-card">
@@ -100,7 +135,7 @@
           </svg>
           Chat
         </h2>
-        <p class="hint">Cùng một phiên: nói trên ESP hoặc gõ ở đây. Câu bạn nói hiện trong bảng này; câu Mèo trả lời phát ra loa ESP.</p>
+        <p class="hint">Gõ chat hoặc bấm Nói ở thẻ Thiết bị. Micro / loa chọn ở trên.</p>
         <ul id="chatLog" class="log chat"></ul>
         <form id="chatForm">
           <label class="sr-only" for="chatInput">Nhắn cho Mèo Bot</label>
@@ -116,6 +151,7 @@
           </svg>
           Nhật ký
         </h2>
+        <p class="hint">Sự kiện backend, ESP và debug mic (màu xám). Thứ tự thời gian: cũ trên, mới nhất dưới cùng — cuộn xuống để xem dòng mới.</p>
         <ul id="eventLog" class="log"></ul>
       </section>
 
@@ -126,7 +162,7 @@
           </svg>
           Firmware
         </h2>
-        <p class="hint">Biên dịch và nạp firmware KatBot lên NodeMCU. Board phải cắm USB vào PC này.</p>
+        <p class="hint">Chọn bản firmware (profile + phiên bản). <strong>Biên dịch</strong> xây lại bản đang chọn; <strong>Nạp</strong> flash đúng phiên bản đó. Nguồn full: <strong id="fwSourceVer">—</strong>. Nếu esptool timeout: rút DIN khỏi RX, giữ FLASH + bấm RST, baud 115200.</p>
 
         <div class="fw-row">
           <div class="fw-port-group">
@@ -140,6 +176,18 @@
                   <path fill="currentColor" d="M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
                 </svg>
                 Tìm lại
+              </button>
+            </div>
+          </div>
+
+          <div class="fw-port-group">
+            <label class="fw-label" for="fwBuild">Firmware</label>
+            <div class="fw-port-row">
+              <select id="fwBuild" class="fw-select">
+                <option value="">-- tải danh sách --</option>
+              </select>
+              <button type="button" id="fwRefreshReleases" class="btn-secondary" title="Tải lại danh sách bản">
+                Tải lại
               </button>
             </div>
           </div>

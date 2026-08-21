@@ -3,7 +3,7 @@ Phần cứng:
 - ESP-12F — vi điều khiển WiFi, mic, loa, OLED, DHT
 - NodeMCU — board cắm ESP-12F, USB, 3V3/5V
 - SSD1306 — OLED 0.96" I2C (module JMD0.96D-1)
-- MAX9814 — mic analog
+- INMP441 — mic I2S
 - MAX98357 — amp I2S
 - Loa 3W — phát TTS/SFX
 - DHT11 — nhiệt độ / độ ẩm

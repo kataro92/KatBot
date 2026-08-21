@@ -228,6 +228,28 @@ def _get_model():
     return _model
 
 
+def prepare_stt_pcm(pcm: bytes, *, target_peak: float = 10000.0, max_gain: float = 24.0) -> tuple[bytes, float, int, int]:
+    """DC-remove and boost quiet INMP441 captures so Whisper sees speech.
+
+    Returns (pcm, gain, peak_in, peak_out).
+    """
+    n = len(pcm) // 2
+    if n == 0:
+        return pcm, 1.0, 0, 0
+    x = np.frombuffer(pcm[: n * 2], dtype=np.int16).astype(np.float32)
+    x -= float(x.mean())
+    peak_in = float(np.max(np.abs(x))) if x.size else 0.0
+    if peak_in < 24.0:
+        out = np.clip(x, -32767, 32767).astype(np.int16).tobytes()
+        return out, 1.0, int(peak_in), int(peak_in)
+    gain = min(max_gain, target_peak / peak_in)
+    if gain < 1.05:
+        gain = 1.0
+    y = np.clip(x * gain, -32767, 32767).astype(np.int16)
+    peak_out = int(np.max(np.abs(y.astype(np.int32))))
+    return y.tobytes(), float(gain), int(peak_in), peak_out
+
+
 def pcm16_to_float(pcm: bytes, in_hz: int = 8000, out_hz: int = 16000) -> np.ndarray:
     if len(pcm) < 2:
         return np.zeros(0, dtype=np.float32)
@@ -308,8 +330,9 @@ def transcribe(pcm: bytes, sample_rate: int = 16000) -> str:
         temperature=0.0,
         condition_on_previous_text=False,
         without_timestamps=True,
-        vad_filter=True,
-        vad_parameters={"min_silence_duration_ms": 250, "speech_pad_ms": 200},
+        # Button listen is already a speech window. Silero VAD treated quiet
+        # INMP441 / Vietnamese as silence and deleted the whole clip.
+        vad_filter=False,
     )
     text = " ".join(seg.text.strip() for seg in segments).strip()
     return text

@@ -2,6 +2,8 @@ const stateEl = document.getElementById("state");
 const tempEl = document.getElementById("temp");
 const humidityEl = document.getElementById("humidity");
 const sessionEl = document.getElementById("session");
+const fwVersionPill = document.getElementById("fwVersionPill");
+const fwSourceVer = document.getElementById("fwSourceVer");
 const devicePill = document.getElementById("devicePill");
 const ollamaPill = document.getElementById("ollamaPill");
 const eventLog = document.getElementById("eventLog");
@@ -58,8 +60,9 @@ function addLog(message, cls, ts) {
   const li = document.createElement("li");
   if (cls) li.className = cls;
   li.textContent = `${formatClock(ts || Date.now())}  ${message}`;
-  eventLog.prepend(li);
-  while (eventLog.children.length > 400) eventLog.lastChild.remove();
+  eventLog.appendChild(li);
+  while (eventLog.children.length > 400) eventLog.firstChild.remove();
+  eventLog.scrollTop = eventLog.scrollHeight;
 }
 
 function addChat(role, text, audioId, ts) {
@@ -161,12 +164,22 @@ function pushPoint(t, temp, hum) {
   history.push({ t, temp, hum });
 }
 
+function setFwVersion(ver) {
+  const v = ver || null;
+  fwVersionPill.textContent = v ? `fw ${v}` : "fw —";
+}
+
 function applySnapshot(msg) {
   setDeviceOnline(!!msg.device_online);
   stateEl.textContent = msg.state || "offline";
   if (msg.temp != null) setTemp(msg.temp);
   if (msg.humidity != null) setHum(msg.humidity);
   sessionEl.textContent = msg.session_id ? `phiên ${msg.session_id}` : "phiên —";
+  if ("fw_version" in msg) setFwVersion(msg.fw_version);
+  if (msg.mic_source || msg.speaker || Number.isFinite(msg.esp_volume)) {
+    applyAudioRoute(msg.mic_source, msg.speaker, msg.esp_volume);
+  }
+  if (msg.listen_duration_ms) listenMs = msg.listen_duration_ms;
 }
 
 function niceRange(min, max, fallbackMin, fallbackMax) {
@@ -375,6 +388,257 @@ function stopListenBar() {
   }
 }
 
+const ROUTE_KEY = "katbot-audio-route";
+const micSourceEl = document.getElementById("micSource");
+const speakerDestEl = document.getElementById("speakerDest");
+const espVolumeEl = document.getElementById("espVolume");
+const espVolumeValueEl = document.getElementById("espVolumeValue");
+const talkBtn = document.getElementById("talkBtn");
+let micSource = "esp";
+let speakerDest = "esp";
+let espVolume = 80;
+let listenMs = 5000;
+let ttsPlayer = null;
+let audioUnlocked = false;
+
+const SILENCE_WAV =
+  "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA";
+
+function unlockAudio() {
+  if (audioUnlocked) return;
+  const a = new Audio(SILENCE_WAV);
+  a.volume = 0.01;
+  a.play()
+    .then(() => {
+      a.pause();
+      audioUnlocked = true;
+    })
+    .catch(() => {});
+}
+
+document.addEventListener("pointerdown", unlockAudio, { capture: true });
+
+function loadLocalRoute() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(ROUTE_KEY) || "{}");
+    if (raw.mic === "pc" || raw.mic === "esp") micSource = raw.mic;
+    if (raw.speaker === "pc" || raw.speaker === "esp") speakerDest = raw.speaker;
+    if (Number.isFinite(raw.espVolume)) {
+      espVolume = Math.max(0, Math.min(100, Math.round(raw.espVolume)));
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+function saveLocalRoute() {
+  localStorage.setItem(
+    ROUTE_KEY,
+    JSON.stringify({ mic: micSource, speaker: speakerDest, espVolume }),
+  );
+}
+
+function applyAudioRoute(mic, speaker, volume) {
+  if (mic === "pc" || mic === "esp") micSource = mic;
+  if (speaker === "pc" || speaker === "esp") speakerDest = speaker;
+  if (Number.isFinite(volume)) {
+    espVolume = Math.max(0, Math.min(100, Math.round(volume)));
+  }
+  micSourceEl.querySelectorAll("button[data-mic]").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.mic === micSource);
+  });
+  speakerDestEl.querySelectorAll("button[data-speaker]").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.speaker === speakerDest);
+  });
+  espVolumeEl.value = String(espVolume);
+  espVolumeValueEl.value = `${espVolume}%`;
+  saveLocalRoute();
+}
+
+async function postAudioRoute(fields) {
+  try {
+    const body = fields || { mic: micSource, speaker: speakerDest };
+    const r = await fetch("/api/audio-route", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) return;
+    const data = await r.json();
+    applyAudioRoute(data.mic_source, data.speaker, data.esp_volume);
+  } catch (err) {
+    addLog(String(err), "err");
+  }
+}
+
+function playTtsClip(audioId) {
+  unlockAudio();
+  if (ttsPlayer) {
+    ttsPlayer.pause();
+    ttsPlayer = null;
+  }
+  ttsPlayer = new Audio(`/api/clips/${encodeURIComponent(audioId)}`);
+  ttsPlayer.play().catch((err) => {
+    addLog("Loa máy tính bị chặn — bấm vào trang rồi thử lại", "warn");
+    addLog(String(err), "debug");
+  });
+}
+
+function floatToPcm16(float32, inRate, outRate) {
+  let data = float32;
+  if (inRate !== outRate && float32.length > 1) {
+    const nOut = Math.max(1, Math.floor((float32.length * outRate) / inRate));
+    const out = new Float32Array(nOut);
+    const last = float32.length - 1;
+    for (let i = 0; i < nOut; i++) {
+      const x = (i * last) / Math.max(1, nOut - 1);
+      const i0 = Math.floor(x);
+      const i1 = Math.min(last, i0 + 1);
+      const t = x - i0;
+      out[i] = float32[i0] * (1 - t) + float32[i1] * t;
+    }
+    data = out;
+  }
+  const pcm = new Int16Array(data.length);
+  for (let i = 0; i < data.length; i++) {
+    const s = Math.max(-1, Math.min(1, data[i]));
+    pcm[i] = s < 0 ? s * 32768 : s * 32767;
+  }
+  return pcm;
+}
+
+async function capturePcMic(ms) {
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: {
+      channelCount: 1,
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+    },
+  });
+  const ctx = new AudioContext();
+  const src = ctx.createMediaStreamSource(stream);
+  const proc = ctx.createScriptProcessor(4096, 1, 1);
+  const mute = ctx.createGain();
+  mute.gain.value = 0;
+  const chunks = [];
+  proc.onaudioprocess = (ev) => {
+    chunks.push(new Float32Array(ev.inputBuffer.getChannelData(0)));
+  };
+  src.connect(proc);
+  proc.connect(mute);
+  mute.connect(ctx.destination);
+  await new Promise((resolve) => setTimeout(resolve, ms));
+  proc.disconnect();
+  src.disconnect();
+  mute.disconnect();
+  stream.getTracks().forEach((t) => t.stop());
+  const inRate = ctx.sampleRate || 48000;
+  await ctx.close();
+  let total = 0;
+  for (const c of chunks) total += c.length;
+  const merged = new Float32Array(total);
+  let off = 0;
+  for (const c of chunks) {
+    merged.set(c, off);
+    off += c.length;
+  }
+  return floatToPcm16(merged, inRate, 16000);
+}
+
+micSourceEl.addEventListener("click", (ev) => {
+  const btn = ev.target.closest("button[data-mic]");
+  if (!btn) return;
+  applyAudioRoute(btn.dataset.mic, speakerDest);
+  postAudioRoute();
+});
+
+speakerDestEl.addEventListener("click", (ev) => {
+  const btn = ev.target.closest("button[data-speaker]");
+  if (!btn) return;
+  applyAudioRoute(micSource, btn.dataset.speaker);
+  postAudioRoute();
+});
+
+let volumeTimer = null;
+espVolumeEl.addEventListener("input", () => {
+  espVolume = Number(espVolumeEl.value);
+  espVolumeValueEl.value = `${espVolume}%`;
+  saveLocalRoute();
+  if (volumeTimer) clearTimeout(volumeTimer);
+  volumeTimer = setTimeout(() => {
+    postAudioRoute({ esp_volume: espVolume });
+  }, 120);
+});
+
+talkBtn.addEventListener("click", () => {
+  startTalk();
+});
+
+let pcListenBusy = false;
+let talkBusy = false;
+
+async function runPcListen(ms) {
+  if (pcListenBusy) return;
+  pcListenBusy = true;
+  unlockAudio();
+  talkBtn.disabled = true;
+  talkBtn.classList.add("busy");
+  startListenBar(ms);
+  try {
+    const pcm = await capturePcMic(ms);
+    stopListenBar();
+    addLog(`PC mic ${pcm.byteLength} byte @ 16000 Hz`);
+    const r = await fetch("/api/listen?hz=16000", {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream" },
+      body: pcm.buffer,
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) addLog(data.detail || `PC mic HTTP ${r.status}`, "err");
+    else if (data.error) addLog(data.error, "err");
+  } catch (err) {
+    stopListenBar();
+    addLog(err && err.message ? err.message : String(err), "err");
+  } finally {
+    pcListenBusy = false;
+    talkBtn.disabled = false;
+    talkBtn.classList.remove("busy");
+  }
+}
+
+async function startTalk() {
+  if (talkBusy || pcListenBusy) return;
+  talkBusy = true;
+  talkBtn.disabled = true;
+  talkBtn.classList.add("busy");
+  try {
+    const r = await fetch("/api/listen/start", { method: "POST" });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      addLog(data.detail || `Nói HTTP ${r.status}`, "err");
+      return;
+    }
+    const ms = data.ms || listenMs;
+    if (data.source === "pc") {
+      talkBusy = false;
+      await runPcListen(ms);
+      return;
+    }
+    // ESP: device starts listen; listen bar comes via WS
+    addLog("Web → ESP bắt đầu nghe");
+    startListenBar(ms);
+  } catch (err) {
+    addLog(err && err.message ? err.message : String(err), "err");
+  } finally {
+    if (!pcListenBusy) {
+      talkBtn.disabled = false;
+      talkBtn.classList.remove("busy");
+    }
+    talkBusy = false;
+  }
+}
+
 function connectMonitor() {
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const ws = new WebSocket(`${proto}://${location.host}/ws/monitor`);
@@ -402,14 +666,40 @@ function connectMonitor() {
         applyTelemetry(msg);
         break;
       case "listen":
-        if (msg.state === "start") startListenBar(msg.ms || 5000);
-        else stopListenBar();
+        if (msg.state === "start") {
+          const ms = msg.ms || listenMs;
+          if (msg.source === "pc" || micSource === "pc") runPcListen(ms);
+          else startListenBar(ms);
+        } else if (!pcListenBusy) {
+          stopListenBar();
+        }
+        break;
+      case "hello":
+        if (msg.from === "device" && msg.payload) {
+          if (msg.payload.fw_version) setFwVersion(msg.payload.fw_version);
+          // Device capability wins over localStorage (mic-only used to force Loa=PC).
+          if (msg.payload.speaker === false) {
+            applyAudioRoute(micSource, "pc");
+          } else if (msg.payload.speaker === true) {
+            applyAudioRoute(micSource, "esp");
+          }
+        }
         break;
       case "log":
-        addLog(msg.message, msg.level === "error" ? "err" : "", msg.ts);
+        addLog(
+          msg.message,
+          msg.level === "error" ? "err" : msg.level === "warn" ? "warn" : msg.level === "debug" ? "debug" : "",
+          msg.ts,
+        );
         break;
       case "chat":
         addChat(msg.role, msg.text, msg.audio_id, msg.ts);
+        break;
+      case "audio_route":
+        applyAudioRoute(msg.mic_source, msg.speaker, msg.esp_volume);
+        break;
+      case "tts_play":
+        if (msg.audio_id) playTtsClip(msg.audio_id);
         break;
       default:
         break;
@@ -450,6 +740,7 @@ async function refreshHealth() {
         : "LLM lỗi";
     ollamaPill.classList.toggle("ok", !!(h.cursor_cli_ready || h.ollama_ready));
     ollamaPill.classList.toggle("bad", !(h.cursor_cli_ready || h.ollama_ready));
+    if (h.listen_ms) listenMs = h.listen_ms;
   } catch {
     ollamaPill.textContent = "Backend lỗi";
     ollamaPill.classList.add("bad");
@@ -494,6 +785,7 @@ async function loadChatHistory() {
   for (const item of data.items || []) {
     addChat(item.role, item.text, item.audio_id, item.ts);
   }
+  chatLog.scrollTop = chatLog.scrollHeight;
 }
 
 async function loadLogHistory() {
@@ -502,8 +794,13 @@ async function loadLogHistory() {
   const data = await r.json();
   eventLog.innerHTML = "";
   for (const item of data.items || []) {
-    addLog(item.message, item.level === "error" ? "err" : "", item.ts);
+    addLog(
+      item.message,
+      item.level === "error" ? "err" : item.level === "warn" ? "warn" : item.level === "debug" ? "debug" : "",
+      item.ts,
+    );
   }
+  eventLog.scrollTop = eventLog.scrollHeight;
 }
 
 async function loadHistory() {
@@ -573,13 +870,40 @@ chatForm.addEventListener("submit", async (e) => {
 
 // ── Firmware panel ──────────────────────────────────────────────────────────
 const fwPort = document.getElementById("fwPort");
+const fwBuild = document.getElementById("fwBuild");
 const fwRefreshPorts = document.getElementById("fwRefreshPorts");
+const fwRefreshReleases = document.getElementById("fwRefreshReleases");
 const fwCompile = document.getElementById("fwCompile");
 const fwFlash = document.getElementById("fwFlash");
 const fwLog = document.getElementById("fwLog");
 const fwStatusChip = document.getElementById("fwStatus");
 
-let fwLastCompileOk = false;
+const FW_PROFILE_ORDER = ["full", "mic"];
+
+function fwReleaseProfile(rel) {
+  if (rel && rel.profile) return rel.profile;
+  const ver = (rel && rel.version) || "";
+  return ver.startsWith("0.1.") ? "mic" : "full";
+}
+
+function fwSelectedBuild() {
+  const opt = fwBuild && fwBuild.selectedOptions[0];
+  if (!opt || !opt.value) return { profile: "", version: "", label: "" };
+  return {
+    profile: opt.dataset.profile || "",
+    version: opt.dataset.version || "",
+    label: opt.dataset.label || opt.textContent || "",
+  };
+}
+
+function fwCanFlash() {
+  const { version } = fwSelectedBuild();
+  return !!(fwPort.value && version);
+}
+
+function fwUpdateFlashEnabled() {
+  fwFlash.disabled = !fwCanFlash() || fwCompile.disabled;
+}
 
 function fwSetStatus(text, cls) {
   fwStatusChip.textContent = text;
@@ -617,13 +941,70 @@ async function fwLoadPorts() {
     fwAppendLog("Lỗi tìm cổng: " + err, "err");
   } finally {
     fwRefreshPorts.disabled = false;
+    fwUpdateFlashEnabled();
+  }
+}
+
+async function fwLoadReleases(preferProfile, preferVersion) {
+  if (fwRefreshReleases) fwRefreshReleases.disabled = true;
+  try {
+    const r = await fetch("/api/firmware/releases", { cache: "no-store" });
+    const data = await r.json();
+    const releases = data.releases || [];
+    const profiles = data.profiles || [
+      { id: "full", label: "mic+loa", version: data.source || "" },
+      { id: "mic", label: "chỉ mic", version: "0.1.0" },
+    ];
+    const prev = fwSelectedBuild();
+    const wantProfile = preferProfile || prev.profile || "";
+    const wantVersion = preferVersion || prev.version || "";
+
+    const latestByProfile = {};
+    for (const rel of releases) {
+      const pid = fwReleaseProfile(rel);
+      if (!latestByProfile[pid]) latestByProfile[pid] = rel;
+    }
+
+    fwBuild.innerHTML = "";
+    const profileMap = Object.fromEntries(profiles.map((p) => [p.id, p]));
+    for (const id of FW_PROFILE_ORDER) {
+      const meta = profileMap[id] || { id, label: id, version: "" };
+      const rel = latestByProfile[id];
+      const opt = document.createElement("option");
+      opt.value = id;
+      opt.dataset.profile = id;
+      opt.dataset.label = meta.label || id;
+      if (rel && rel.version) {
+        opt.dataset.version = rel.version;
+        const kb = rel.size ? ` — ${Math.round(rel.size / 1024)} KB` : "";
+        opt.textContent = `${meta.label} — v${rel.version}${kb}`;
+      } else {
+        opt.dataset.version = "";
+        opt.textContent = `${meta.label} — chưa biên dịch`;
+      }
+      fwBuild.appendChild(opt);
+    }
+
+    if (wantProfile && [...fwBuild.options].some((o) => o.value === wantProfile)) {
+      fwBuild.value = wantProfile;
+    } else if (wantVersion) {
+      const match = [...fwBuild.options].find((o) => o.dataset.version === wantVersion);
+      if (match) fwBuild.value = match.value;
+    }
+    if (fwSourceVer) fwSourceVer.textContent = data.source ? `v${data.source}` : "—";
+  } catch (err) {
+    fwAppendLog("Lỗi tải phiên bản: " + err, "err");
+  } finally {
+    if (fwRefreshReleases) fwRefreshReleases.disabled = false;
+    fwUpdateFlashEnabled();
   }
 }
 
 async function fwStreamAction(url, payload) {
   fwLog.innerHTML = "";
   fwCompile.disabled = true;
-  fwFlash.disabled = true;
+  fwUpdateFlashEnabled();
+  const keepProfile = fwSelectedBuild().profile;
 
   try {
     const r = await fetch(url, {
@@ -658,50 +1039,59 @@ async function fwStreamAction(url, payload) {
     fwAppendLog("Lỗi kết nối: " + err, "err");
     fwSetStatus("Lỗi kết nối", "err");
   } finally {
-    // Re-check status from server
     try {
       const s = await fetch("/api/firmware/status", { cache: "no-store" });
       const st = await s.json();
       if (st.ok === true) {
         fwSetStatus(st.message || "Hoàn thành", "ok");
-        if (st.phase === "idle" && st.message.includes("Biên dịch")) {
-          fwLastCompileOk = true;
-          fwFlash.disabled = !fwPort.value;
-        }
       } else if (st.ok === false) {
         fwSetStatus(st.message || "Lỗi", "err");
       } else {
         fwSetStatus("Sẵn sàng");
       }
+      await fwLoadReleases(keepProfile || payload?.profile, st.latest_release);
     } catch (_) {}
     fwCompile.disabled = false;
-    if (fwLastCompileOk) fwFlash.disabled = !fwPort.value;
+    fwUpdateFlashEnabled();
   }
 }
 
 fwRefreshPorts.addEventListener("click", fwLoadPorts);
+if (fwRefreshReleases) fwRefreshReleases.addEventListener("click", () => fwLoadReleases());
 
-fwPort.addEventListener("change", () => {
-  if (fwLastCompileOk) fwFlash.disabled = !fwPort.value;
-});
+fwPort.addEventListener("change", fwUpdateFlashEnabled);
+fwBuild.addEventListener("change", fwUpdateFlashEnabled);
 
 fwCompile.addEventListener("click", async () => {
-  fwSetStatus("Đang biên dịch…", "busy");
-  fwLastCompileOk = false;
-  fwFlash.disabled = true;
-  await fwStreamAction("/api/firmware/compile", {});
+  const { profile, label } = fwSelectedBuild();
+  if (!profile) {
+    fwAppendLog("Vui lòng chọn firmware trước.", "err");
+    return;
+  }
+  fwSetStatus(`Đang biên dịch ${label || profile}…`, "busy");
+  await fwStreamAction("/api/firmware/compile", { profile });
 });
 
 fwFlash.addEventListener("click", async () => {
   const port = fwPort.value;
+  const { version, label } = fwSelectedBuild();
   if (!port) { fwAppendLog("Vui lòng chọn cổng COM trước.", "err"); return; }
-  fwSetStatus(`Đang nạp lên ${port}…`, "busy");
-  await fwStreamAction("/api/firmware/flash", { port });
+  if (!version) { fwAppendLog("Bản này chưa biên dịch — bấm Biên dịch trước.", "err"); return; }
+  fwSetStatus(`Đang nạp ${label || version} lên ${port}…`, "busy");
+  await fwStreamAction("/api/firmware/flash", { port, version });
 });
 
 fwLoadPorts();
+fwLoadReleases();
+fwSetStatus("Sẵn sàng");
 
-loadHistory().finally(() => connectMonitor());
+loadLocalRoute();
+applyAudioRoute(micSource, speakerDest);
+// Push mic + volume on load; speaker follows device hello / hub snapshot.
+Promise.all([
+  loadHistory(),
+  postAudioRoute({ mic: micSource, esp_volume: espVolume }),
+]).finally(() => connectMonitor());
 refreshHealth();
 checkFrontendVersion();
 setInterval(refreshHealth, 10000);

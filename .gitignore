@@ -15,5 +15,10 @@ docs/__pycache__/
 *.bin
 *.elf
 *.map
+!firmware/releases/**/*.bin
 firmware/build/
+firmware/KatBot/build_opt.h
+firmware/KatBot/KatBot.ino.globals.h
+firmware/releases/**/*.elf
+firmware/releases/**/*.map
 .cursor-cli-ws/
